@@ -25,6 +25,8 @@ Boot enchantments expand the move:
 
 The core gameplay is available in development builds. There is currently no published release.
 
+The current tuning build intentionally leaves charge, kick, and terrain-destruction upper bounds uncapped. Back up test worlds before experimenting with extreme values.
+
 ## License
 
 One Kick is available under the [MIT License](LICENSE).

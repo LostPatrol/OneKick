@@ -47,7 +47,7 @@ public final class KickEffects {
             return;
         }
         ServerLevel level = player.serverLevel();
-        double progress = maximum <= 0.0F ? 0.0D : charge / maximum;
+        double progress = maximum <= 0.0F ? 0.0D : Math.min(1.0D, Math.max(0.0D, charge / maximum));
         double angle = (player.tickCount * (0.18D + levelValue * 0.02D)) % (Math.PI * 2.0D);
         double radius = 0.55D + progress * 0.45D;
         double x = player.getX() + Math.cos(angle) * radius;

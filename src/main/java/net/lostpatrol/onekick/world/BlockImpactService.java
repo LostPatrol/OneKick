@@ -9,6 +9,7 @@ import net.lostpatrol.onekick.kick.KickMath;
 import net.lostpatrol.onekick.kick.KickSnapshot;
 import net.lostpatrol.onekick.registry.ModTags;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.game.ClientboundExplodePacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -78,8 +79,8 @@ public final class BlockImpactService {
         double depth = KickMath.disintegrationDepth(
                 snapshot.kickSpeed(), snapshot.enchantments().kineticOverload());
         double radius = KickMath.disintegrationRadius(snapshot.kickSpeed(), true);
-        int count = Mth.clamp((int) Math.ceil(depth / 1.75D), 2, KickMath.MAX_CHAIN_EXPLOSIONS);
-        float power = (float) Mth.clamp(radius / 1.35D, 1.8D, 4.5D);
+        int count = Math.max(2, Mth.ceil(depth / 1.75D));
+        float power = (float) Math.max(1.8D, radius / 1.35D);
         long now = level.getServer().getTickCount();
         for (int i = 0; i < count; i++) {
             double distance = count == 1 ? 0.0D : depth * i / (count - 1.0D);
@@ -103,16 +104,24 @@ public final class BlockImpactService {
                 return;
             }
             visualExplosion.explode();
-            visualExplosion.finalizeExplosion(true);
-            destroySphere(level, position, Math.min(6.0D, power * 1.35D), snapshot);
+            visualExplosion.finalizeExplosion(false);
+            sendExplosionPacket(level, position, power, visualExplosion);
+            destroySphere(level, position, power * 1.35D, snapshot);
             return;
         }
 
-        Explosion explosion = new Explosion(level, source, position.x, position.y, position.z, power,
-                false, Explosion.BlockInteraction.DESTROY_WITH_DECAY);
-        if (!ForgeEventFactory.onExplosionStart(level, explosion)) {
-            explosion.explode();
-            explosion.finalizeExplosion(true);
+        level.explode(source, position.x, position.y, position.z, power, Level.ExplosionInteraction.BLOCK);
+    }
+
+    private static void sendExplosionPacket(
+            ServerLevel level, Vec3 position, float power, Explosion explosion) {
+        explosion.clearToBlow();
+        for (ServerPlayer player : level.players()) {
+            if (player.distanceToSqr(position.x, position.y, position.z) < 4096.0D) {
+                player.connection.send(new ClientboundExplodePacket(
+                        position.x, position.y, position.z, power,
+                        explosion.getToBlow(), explosion.getHitPlayers().get(player)));
+            }
         }
     }
 
@@ -179,11 +188,7 @@ public final class BlockImpactService {
         boolean silkTouch = snapshot.enchantments().silkTouch();
         double dropChance = silkTouch ? 1.0D : 0.30D;
         int affected = 0;
-        int debrisCount = 0;
         for (BlockPos pos : candidates) {
-            if (affected >= KickMath.MAX_AFFECTED_BLOCKS) {
-                break;
-            }
             if (!canDestroy(level, pos)) {
                 continue;
             }
@@ -197,7 +202,6 @@ public final class BlockImpactService {
             boolean animate = !state.is(ModTags.DISINTEGRATION_DIRECT)
                     && !state.hasBlockEntity()
                     && state.getDestroySpeed(level, pos) <= 4.0F
-                    && debrisCount < KickMath.MAX_DEBRIS_BLOCKS
                     && level.random.nextFloat() < 0.45F;
             if (animate) {
                 Vec3 away = Vec3.atCenterOf(pos).subtract(impact);
@@ -205,13 +209,12 @@ public final class BlockImpactService {
                     away = direction.lengthSqr() > 0.0D ? direction : new Vec3(0.0D, 1.0D, 0.0D);
                 }
                 away = away.normalize();
-                double strength = Math.min(1.2D, 0.22D + snapshot.kickSpeed() * 0.045D);
+                double strength = 0.22D + snapshot.kickSpeed() * 0.045D;
                 Vec3 velocity = away.scale(strength)
                         .add(direction.scale(0.12D))
                         .add(0.0D, 0.22D + level.random.nextDouble() * 0.25D, 0.0D);
                 ImpactDebrisEntity.launch(level, pos, state, velocity, attacker,
                         silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop);
-                debrisCount++;
             } else {
                 removeBlock(level, pos, state, attacker,
                         silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop);

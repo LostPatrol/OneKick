@@ -89,11 +89,17 @@ public final class ClientEvents {
             keyWasDown = keyDown;
         }
 
-        @SubscribeEvent
-        public static void renderHud(RenderGuiOverlayEvent.Post event) {
-            if (event.getOverlay().id().equals(VanillaGuiOverlay.HOTBAR.id())) {
+        @SubscribeEvent(priority = EventPriority.HIGHEST)
+        public static void renderHud(RenderGuiOverlayEvent.Pre event) {
+            if (!ClientKickState.shouldRenderChargeHud()) {
+                return;
+            }
+            if (event.getOverlay().id().equals(VanillaGuiOverlay.JUMP_BAR.id())) {
+                event.setCanceled(true);
+            } else if (event.getOverlay().id().equals(VanillaGuiOverlay.EXPERIENCE_BAR.id())) {
                 ClientKickState.renderChargeHud(event.getGuiGraphics(),
                         event.getWindow().getGuiScaledWidth(), event.getWindow().getGuiScaledHeight());
+                event.setCanceled(true);
             }
         }
 

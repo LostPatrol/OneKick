@@ -1,5 +1,6 @@
 package net.lostpatrol.onekick.client;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import java.util.HashMap;
 import java.util.Map;
 import net.lostpatrol.onekick.network.KickNetwork;
@@ -7,9 +8,12 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
 
 public final class ClientKickState {
+    private static final ResourceLocation GUI_ICONS_LOCATION =
+            ResourceLocation.withDefaultNamespace("textures/gui/icons.png");
     private static final Map<Integer, PlayerAnimation> PLAYER_ANIMATIONS = new HashMap<>();
     private static final Map<Integer, KickedVisual> KICKED_ENTITIES = new HashMap<>();
     private static boolean charging;
@@ -84,23 +88,34 @@ public final class ClientKickState {
         return ((float) (gameTime() - visual.startedAt()) + partialTick) * 45.0F;
     }
 
+    public static boolean shouldRenderChargeHud() {
+        Minecraft minecraft = Minecraft.getInstance();
+        return charging && minecraft.player != null && !minecraft.options.hideGui && chargeMaximum > 0.0F;
+    }
+
     public static void renderChargeHud(GuiGraphics graphics, int width, int height) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (!charging || minecraft.options.hideGui || chargeMaximum <= 0.0F) {
+        if (!shouldRenderChargeHud()) {
             return;
         }
         int barWidth = 182;
         int x = (width - barWidth) / 2;
-        int y = height - 59;
-        int filled = Math.min(barWidth, Math.round(barWidth * charge / chargeMaximum));
-        boolean fullFlash = charge >= chargeMaximum && ((gameTime() / 5L) & 1L) == 0L;
-        int fillColor = fullFlash ? 0xFFFFFFFF : 0xFFFFC33C;
-        graphics.fill(x - 1, y - 1, x + barWidth + 1, y + 6, 0xCC000000);
-        graphics.fill(x, y, x + barWidth, y + 5, 0xCC3A2E1E);
-        graphics.fill(x, y, x + filled, y + 5, fillColor);
-        String value = String.format(java.util.Locale.ROOT, "%.2f / %.2f", charge, chargeMaximum);
-        graphics.drawCenteredString(minecraft.font, value, width / 2, y - 12,
-                fullFlash ? 0xFFFFFFFF : 0xFFFFE6A0);
+        int y = height - 32 + 3;
+        int filled = (int) (Math.min(1.0F, charge / chargeMaximum) * 183.0F);
+        graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.disableBlend();
+        graphics.blit(GUI_ICONS_LOCATION, x, y, 0, 84, barWidth, 5);
+        if (filled > 0) {
+            graphics.blit(GUI_ICONS_LOCATION, x, y, 0, 89, filled, 5);
+        }
+        RenderSystem.enableBlend();
+        graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+
+        boolean showFullValue = charge < chargeMaximum || ((gameTime() / 5L) & 1L) == 0L;
+        if (showFullValue) {
+            String value = String.format(java.util.Locale.ROOT, "%.2f", charge);
+            graphics.drawCenteredString(minecraft.font, value, width / 2, y - 12, 0xFFFFFFFF);
+        }
     }
 
     public static void clear() {

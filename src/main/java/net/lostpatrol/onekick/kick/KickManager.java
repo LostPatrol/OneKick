@@ -88,9 +88,8 @@ public final class KickManager {
             cancelCharge(player, state);
             return;
         }
-        if (state.charge < state.chargeMaximum && canGrowCharge(player)) {
-            float increase = Math.min(KickMath.chargePerTick(state.chargeLevel),
-                    state.chargeMaximum - state.charge);
+        if (canGrowCharge(player)) {
+            float increase = KickMath.chargePerTick(state.chargeLevel);
             state.charge += increase;
             if (!player.getAbilities().instabuild) {
                 state.chargeFoodDebt += KickMath.chargeFoodCost(increase);
@@ -112,7 +111,7 @@ public final class KickManager {
             return;
         }
         state.age++;
-        if (!entity.isAlive() || state.age > 100) {
+        if (!entity.isAlive()) {
             stopTracking(entity);
             return;
         }
@@ -132,7 +131,7 @@ public final class KickManager {
             float damage = KickMath.collisionDamage(beforeSpeed, afterSpeed,
                     state.snapshot.enchantments().kineticOverload());
             if (damage <= 0.0F && beforeSpeed > 0.65D) {
-                damage = (float) Math.min(80.0D, (beforeSpeed - 0.35D) * 6.0D
+                damage = (float) ((beforeSpeed - 0.35D) * 6.0D
                         * (1.0D + state.snapshot.enchantments().kineticOverload()));
             }
             if (damage > 0.0F) {
@@ -257,7 +256,7 @@ public final class KickManager {
             double kickSpeed,
             float charge) {
         Vec3 look = player.getLookAngle().normalize();
-        Vec3 launchDirection = new Vec3(look.x, Math.max(look.y, 0.08D), look.z).normalize();
+        Vec3 launchDirection = KickMath.launchDirection(look);
         double launchSpeed = KickMath.launchSpeed(kickSpeed, target);
         float directDamage = KickMath.directDamage(kickSpeed, charge, enchantments.kineticOverload());
         if (directDamage > 0.0F) {
@@ -287,7 +286,7 @@ public final class KickManager {
     }
 
     private static void applyBlockReaction(ServerPlayer player, double kickSpeed) {
-        double reaction = Mth.clamp(kickSpeed * 0.22D, 0.0D, 2.0D);
+        double reaction = Math.max(0.0D, kickSpeed * 0.22D);
         player.setDeltaMovement(player.getDeltaMovement().add(player.getLookAngle().normalize().scale(-reaction)));
         player.hurtMarked = true;
     }
@@ -300,7 +299,7 @@ public final class KickManager {
         horizontal = horizontal.normalize();
         Vec3 movement = player.getDeltaMovement();
         double forward = movement.dot(horizontal);
-        double reaction = Mth.clamp(kickSpeed * 0.14D, 0.0D, 1.5D);
+        double reaction = Math.max(0.0D, kickSpeed * 0.14D);
         double reduction = forward > 0.0D ? Math.min(forward, reaction) : reaction;
         player.setDeltaMovement(movement.subtract(horizontal.scale(reduction)));
         player.hurtMarked = true;
@@ -314,7 +313,7 @@ public final class KickManager {
         if (!player.onGround()) {
             state.airUses++;
         }
-        double reaction = Mth.clamp(kickSpeed * 0.16D * (1.0D + level * 0.15D), 0.0D, 2.5D);
+        double reaction = Math.max(0.0D, kickSpeed * 0.16D * (1.0D + level * 0.15D));
         Vec3 push = player.getLookAngle().normalize().scale(-reaction);
         player.setDeltaMovement(player.getDeltaMovement().add(push));
         player.hurtMarked = true;
