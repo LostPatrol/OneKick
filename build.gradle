@@ -152,6 +152,15 @@ tasks.named('test', Test).configure {
     useJUnitPlatform()
 }
 
+def prepareGameTestStructures = tasks.register('prepareGameTestStructures', Copy) {
+    from layout.projectDirectory.dir('gameteststructures')
+    into layout.projectDirectory.dir('run/gameteststructures')
+}
+
+tasks.matching { it.name == 'prepareRunGameTestServer' }.configureEach {
+    dependsOn prepareGameTestStructures
+}
+
 // This block of code expands all declared replace properties in the specified resource targets.
 // A missing property will result in an error. Properties are expanded using ${} Groovy notation.
 // When "copyIdeResources" is enabled, this will also run before the game launches in IDE environments.

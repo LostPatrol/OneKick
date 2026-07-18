@@ -25,7 +25,7 @@ Boot enchantments expand the move:
 
 The core gameplay is available in development builds. There is currently no published release.
 
-Charge stops at its enchantment-defined maximum, while **Overcharge I–II** multiplies that maximum by 2–3. Launched creatures follow a gravity-driven arc like a snowball; if their movement veers too far from the initial direction, both the trail and follow-up impact effects stop. The current tuning build still leaves kick and terrain-destruction upper bounds uncapped, so back up test worlds before experimenting with extreme values.
+Charge stops at its enchantment-defined maximum, while **Overcharge I–II** multiplies that maximum by 2–3. Launched creatures follow a server-controlled ballistic arc: stronger kicks keep the curve flatter and travel farther. The kick itself deals no damage; kinetic damage starts only when the creature later collides, while Disintegration and Unstable Collision can add damage during their forced traversal. If movement veers too far from the initial direction, both the trail and follow-up impact effects stop. The current tuning build still leaves kick and terrain-destruction upper bounds uncapped, so back up test worlds before experimenting with extreme values.
 
 ## License
 

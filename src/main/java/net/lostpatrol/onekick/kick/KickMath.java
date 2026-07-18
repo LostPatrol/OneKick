@@ -15,9 +15,9 @@ public final class KickMath {
     public static final int COOLDOWN_TICKS = 12;
     public static final float CHARGE_SPEED_MULTIPLIER = 6.0F;
     private static final double CHARGE_QUADRATIC_COEFFICIENT = 1.0D / 15.0D;
-    private static final double PROJECTILE_AIR_DRAG = 0.99D;
-    private static final double PROJECTILE_WATER_DRAG = 0.8D;
-    private static final double PROJECTILE_GRAVITY = 0.03D;
+    private static final double BALLISTIC_GRAVITY = 0.06D;
+    private static final double SUBMERGED_DRAG = 0.82D;
+    private static final double SUBMERGED_GRAVITY = 0.02D;
     private static final double MIN_IMPACT_ALIGNMENT = Math.cos(Math.toRadians(35.0D));
 
     private KickMath() {
@@ -94,10 +94,11 @@ public final class KickMath {
         return direction.add(0.0D, 0.12D, 0.0D).normalize();
     }
 
-    public static Vec3 nextFlightVelocity(Vec3 velocity, boolean inWater, boolean noGravity) {
-        double drag = inWater ? PROJECTILE_WATER_DRAG : PROJECTILE_AIR_DRAG;
-        Vec3 next = velocity.scale(drag);
-        return noGravity ? next : next.add(0.0D, -PROJECTILE_GRAVITY, 0.0D);
+    public static Vec3 nextBallisticVelocity(Vec3 velocity, boolean submerged) {
+        if (submerged) {
+            return velocity.scale(SUBMERGED_DRAG).add(0.0D, -SUBMERGED_GRAVITY, 0.0D);
+        }
+        return velocity.add(0.0D, -BALLISTIC_GRAVITY, 0.0D);
     }
 
     public static float collisionDamage(double beforeSpeed, double afterSpeed, int overloadLevel) {

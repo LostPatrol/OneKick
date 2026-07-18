@@ -19,6 +19,7 @@ import net.minecraft.world.entity.EntitySelector;
 import net.minecraft.world.entity.FlyingMob;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.animal.FlyingAnimal;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
@@ -128,65 +129,77 @@ public final class KickManager {
             return;
         }
 
-        Vec3 currentPosition = entity.position();
-        Vec3 currentVelocity = entity.getDeltaMovement();
-        AABB currentBounds = entity.getBoundingBox();
-        Vec3 observedMovement = currentPosition.subtract(state.lastPosition);
+        Vec3 startPosition = entity.position();
+        Vec3 observedMovement = startPosition.subtract(state.lastPosition);
         if (state.age > 1
                 && observedMovement.lengthSqr() > 1.0E-6D
                 && !KickMath.isAlignedImpact(state.initialVelocity, observedMovement)) {
+            releaseControlledMotion(entity, state.lastVelocity);
             stopTracking(entity);
             return;
         }
+        Vec3 flightVelocity = state.lastVelocity;
+        if (!KickMath.isAlignedImpact(state.initialVelocity, flightVelocity)) {
+            releaseControlledMotion(entity, flightVelocity);
+            stopTracking(entity);
+            return;
+        }
+
+        suppressVoluntaryMovement(entity);
+        entity.move(MoverType.SELF, flightVelocity);
+        Vec3 currentPosition = entity.position();
+        AABB currentBounds = entity.getBoundingBox();
+        Vec3 actualMovement = currentPosition.subtract(startPosition);
         Entity entityCollision = state.age > 2
                 ? findEntityCollision(level, entity, state, currentPosition, currentBounds)
                 : null;
-        boolean blockCollision = state.age > 1 && (entity.horizontalCollision
-                || entity.verticalCollision && Math.abs(state.lastVelocity.y) > 0.35D);
+        boolean movementClipped = actualMovement.subtract(flightVelocity).lengthSqr() > 1.0E-6D;
+        boolean blockCollision = state.age > 1
+                && movementClipped
+                && (entity.horizontalCollision
+                || entity.verticalCollision && Math.abs(flightVelocity.y) > 0.35D);
 
         if (blockCollision || entityCollision != null) {
-            if (!KickMath.isAlignedImpact(state.initialVelocity, state.lastVelocity)) {
-                stopTracking(entity);
-                return;
-            }
-            double beforeSpeed = state.lastVelocity.length();
-            double afterSpeed = currentVelocity.length();
+            double beforeSpeed = flightVelocity.length();
+            double afterSpeed = entityCollision == null ? actualMovement.length() : 0.0D;
             float damage = KickMath.collisionDamage(beforeSpeed, afterSpeed,
                     state.snapshot.enchantments().kineticOverload());
-            if (damage <= 0.0F && beforeSpeed > 0.65D) {
-                damage = (float) ((beforeSpeed - 0.35D) * 6.0D
-                        * (1.0D + state.snapshot.enchantments().kineticOverload()));
-            }
             if (damage > 0.0F) {
                 entity.hurt(level.damageSources().flyIntoWall(), damage);
             }
             Vec3 impact = entityCollision == null
-                    ? findBlockImpact(level, entity, state.lastVelocity)
+                    ? findBlockImpact(level, entity, flightVelocity)
                     : entityCollision.getBoundingBox().getCenter();
-            BlockImpactService.handleImpact(level, entity, impact, state.lastVelocity, state.snapshot);
+            BlockImpactService.handleImpact(level, entity, impact, flightVelocity, state.snapshot);
             KickEnchantments enchantments = state.snapshot.enchantments();
             if (entity.isAlive()
                     && (enchantments.disintegration() > 0 || enchantments.unstableCollision() > 0)) {
-                startTraversal(entity, state, state.lastVelocity, beforeSpeed);
+                startTraversal(entity, state, flightVelocity, beforeSpeed);
                 return;
             }
+            haltControlledMotion(entity);
             stopTracking(entity);
             return;
         }
 
-        double speed = state.lastVelocity.length();
+        if (actualMovement.lengthSqr() > 1.0E-6D
+                && !KickMath.isAlignedImpact(state.initialVelocity, actualMovement)) {
+            releaseControlledMotion(entity, actualMovement);
+            stopTracking(entity);
+            return;
+        }
+
+        double speed = flightVelocity.length();
         state.slowTicks = speed < 0.12D ? state.slowTicks + 1 : 0;
         if (state.slowTicks >= 5 || state.spin && state.age > 4 && entity.onGround()) {
+            haltControlledMotion(entity);
             stopTracking(entity);
             return;
         }
         state.lastPosition = currentPosition;
         state.lastBounds = currentBounds;
-        if (state.age > 1) {
-            state.lastVelocity = KickMath.nextFlightVelocity(
-                    state.lastVelocity, entity.isInWater(), entity.isNoGravity());
-        }
-        prepareFlightTick(entity, state.lastVelocity);
+        state.lastVelocity = KickMath.nextBallisticVelocity(flightVelocity, entity.isInWater());
+        storeControlledMotion(entity, state.lastVelocity);
     }
 
     public static void removePlayer(ServerPlayer player) {
@@ -285,7 +298,6 @@ public final class KickManager {
             ItemStack boots,
             KickEnchantments enchantments,
             double kickSpeed) {
-        stopTracking(target);
         Vec3 look = player.getLookAngle().normalize();
         Vec3 launchDirection = KickMath.launchDirection(look);
         double launchSpeed = KickMath.launchSpeed(kickSpeed, target);
@@ -304,13 +316,20 @@ public final class KickManager {
                 && !(target instanceof FlyingAnimal)
                 && !target.getType().is(ModTags.FLYING);
         KickSnapshot snapshot = new KickSnapshot(player.getUUID(), kickSpeed, enchantments, boots);
+        startKickedMotion(target, snapshot, velocity, spin);
+    }
+
+    static void startKickedMotion(
+            LivingEntity target, KickSnapshot snapshot, Vec3 velocity, boolean spin) {
+        stopTracking(target);
         boolean originalNoAi = target instanceof Mob mob && mob.isNoAi();
         KickedMotionState motionState = new KickedMotionState(
                 snapshot, target.position(), target.getBoundingBox(), velocity, spin,
                 target.noPhysics, originalNoAi);
         KICKED_ENTITIES.put(target.getUUID(), motionState);
-        prepareFlightTick(target, velocity);
-        KickNetwork.broadcastKickedState(target, true, spin, (float) launchSpeed);
+        suppressVoluntaryMovement(target);
+        storeControlledMotion(target, velocity);
+        KickNetwork.broadcastKickedState(target, true, spin, (float) velocity.length());
     }
 
     private static void startTraversal(
@@ -332,15 +351,15 @@ public final class KickManager {
         state.lastVelocity = state.traversalDirection.scale(state.traversalSpeed);
         entity.noPhysics = true;
         entity.fallDistance = 0.0F;
-        applyControlledVelocity(entity, state.lastVelocity);
+        suppressVoluntaryMovement(entity);
+        storeControlledMotion(entity, state.lastVelocity);
     }
 
     private static void tickTraversal(
             ServerLevel level, LivingEntity entity, KickedMotionState state) {
         Vec3 currentPosition = entity.position();
-        state.traversalRemaining -= currentPosition.distanceTo(state.lastPosition);
         if (state.traversalRemaining <= 1.0E-3D) {
-            entity.setDeltaMovement(Vec3.ZERO);
+            haltControlledMotion(entity);
             stopTracking(entity);
             return;
         }
@@ -349,15 +368,22 @@ public final class KickManager {
         Vec3 forcedVelocity = state.traversalDirection.scale(forcedSpeed);
         BlockPos nextPosition = BlockPos.containing(currentPosition.add(forcedVelocity));
         if (!level.hasChunkAt(nextPosition)) {
-            entity.setDeltaMovement(Vec3.ZERO);
+            haltControlledMotion(entity);
             stopTracking(entity);
             return;
         }
 
+        suppressVoluntaryMovement(entity);
+        entity.noPhysics = true;
+        entity.fallDistance = 0.0F;
+        entity.move(MoverType.SELF, forcedVelocity);
+        Vec3 movedPosition = entity.position();
+        state.traversalRemaining -= movedPosition.distanceTo(currentPosition);
         state.traversalTicks++;
         if (state.traversalTicks % 3 == 0) {
             float damage = KickMath.traversalDamage(
                     state.traversalSpeed, state.snapshot.enchantments().kineticOverload());
+            entity.invulnerableTime = 0;
             entity.hurt(level.damageSources().flyIntoWall(), damage);
             if (!entity.isAlive()) {
                 stopTracking(entity);
@@ -365,12 +391,15 @@ public final class KickManager {
             }
         }
 
-        entity.noPhysics = true;
-        entity.fallDistance = 0.0F;
-        applyControlledVelocity(entity, forcedVelocity);
-        state.lastPosition = currentPosition;
+        state.lastPosition = movedPosition;
         state.lastBounds = entity.getBoundingBox();
         state.lastVelocity = forcedVelocity;
+        if (state.traversalRemaining <= 1.0E-3D) {
+            haltControlledMotion(entity);
+            stopTracking(entity);
+            return;
+        }
+        storeControlledMotion(entity, forcedVelocity);
     }
 
     private static void applyBlockReaction(ServerPlayer player, double kickSpeed) {
@@ -477,7 +506,7 @@ public final class KickManager {
         food.setSaturation(Math.min(food.getSaturationLevel(), food.getFoodLevel()));
     }
 
-    private static void prepareFlightTick(LivingEntity entity, Vec3 velocity) {
+    private static void suppressVoluntaryMovement(LivingEntity entity) {
         if (entity instanceof Mob mob) {
             mob.setNoAi(true);
             mob.getNavigation().stop();
@@ -486,12 +515,22 @@ public final class KickManager {
             mob.setYya(0.0F);
             mob.setZza(0.0F);
         }
-        applyControlledVelocity(entity, velocity);
     }
 
-    private static void applyControlledVelocity(LivingEntity entity, Vec3 velocity) {
-        Vec3 inputVelocity = entity instanceof Mob ? velocity.scale(1.0D / 0.98D) : velocity;
-        entity.setDeltaMovement(inputVelocity);
+    private static void storeControlledMotion(LivingEntity entity, Vec3 velocity) {
+        entity.setDeltaMovement(entity instanceof Mob ? velocity.scale(1.0D / 0.98D) : Vec3.ZERO);
+        entity.hasImpulse = true;
+        entity.hurtMarked = true;
+    }
+
+    private static void releaseControlledMotion(LivingEntity entity, Vec3 velocity) {
+        entity.setDeltaMovement(velocity);
+        entity.hasImpulse = true;
+        entity.hurtMarked = true;
+    }
+
+    private static void haltControlledMotion(LivingEntity entity) {
+        entity.setDeltaMovement(Vec3.ZERO);
         entity.hasImpulse = true;
         entity.hurtMarked = true;
     }

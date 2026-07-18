@@ -56,16 +56,34 @@ class KickMathTest {
     }
 
     @Test
-    void kickedFlightUsesSnowballDragAndGravity() {
-        Vec3 air = KickMath.nextFlightVelocity(new Vec3(10.0D, 2.0D, -5.0D), false, false);
-        assertEquals(9.9D, air.x, 1.0E-9D);
-        assertEquals(1.95D, air.y, 1.0E-9D);
-        assertEquals(-4.95D, air.z, 1.0E-9D);
+    void kickedFlightUsesAConstantGravityBallisticArc() {
+        Vec3 air = KickMath.nextBallisticVelocity(new Vec3(10.0D, 2.0D, -5.0D), false);
+        assertEquals(10.0D, air.x, 1.0E-9D);
+        assertEquals(1.94D, air.y, 1.0E-9D);
+        assertEquals(-5.0D, air.z, 1.0E-9D);
 
-        Vec3 water = KickMath.nextFlightVelocity(new Vec3(10.0D, 2.0D, -5.0D), true, false);
-        assertEquals(8.0D, water.x, 1.0E-9D);
-        assertEquals(1.57D, water.y, 1.0E-9D);
-        assertEquals(-4.0D, water.z, 1.0E-9D);
+        Vec3 water = KickMath.nextBallisticVelocity(new Vec3(10.0D, 2.0D, -5.0D), true);
+        assertEquals(8.2D, water.x, 1.0E-9D);
+        assertEquals(1.62D, water.y, 1.0E-9D);
+        assertEquals(-4.1D, water.z, 1.0E-9D);
+    }
+
+    @Test
+    void strongerKickKeepsItsArcFlatterAndTravelsFarther() {
+        Vec3 direction = new Vec3(1.0D, 0.3D, 0.0D).normalize();
+        Vec3 low = direction;
+        Vec3 high = direction.scale(4.0D);
+        Vec3 lowNext = KickMath.nextBallisticVelocity(low, false);
+        Vec3 highNext = KickMath.nextBallisticVelocity(high, false);
+        double initialSlope = direction.y / direction.x;
+        assertTrue(Math.abs(highNext.y / highNext.x - initialSlope)
+                < Math.abs(lowNext.y / lowNext.x - initialSlope));
+        assertTrue(simulatedBallisticRange(high) > simulatedBallisticRange(low) * 8.0D);
+    }
+
+    @Test
+    void collisionDamageRequiresActualSpeedLoss() {
+        assertEquals(0.0F, KickMath.collisionDamage(3.0D, 3.0D, 3), 1.0E-6F);
     }
 
     @Test
@@ -108,5 +126,18 @@ class KickMathTest {
                 KickMath.impactTraversalDistance(kickSpeed, 1, 2, 0), 1.0E-6D);
         assertEquals(KickMath.disintegrationDepth(kickSpeed, 1),
                 KickMath.impactTraversalDistance(kickSpeed, 1, 2, 1), 1.0E-9D);
+    }
+
+    private static double simulatedBallisticRange(Vec3 initialVelocity) {
+        Vec3 position = Vec3.ZERO;
+        Vec3 velocity = initialVelocity;
+        for (int tick = 0; tick < 500; tick++) {
+            position = position.add(velocity);
+            velocity = KickMath.nextBallisticVelocity(velocity, false);
+            if (tick > 0 && position.y <= 0.0D) {
+                return position.horizontalDistance();
+            }
+        }
+        throw new AssertionError("Ballistic arc did not return to its launch height");
     }
 }
