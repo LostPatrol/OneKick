@@ -199,44 +199,68 @@ public final class ClientKickState {
         }
         double progress = Mth.clamp(visual.charge / visual.maximum, 0.0F, 1.0F);
         boolean full = progress >= 0.999D;
-        double outerRadius = 1.8D + Math.max(0, visual.level) * 0.55D;
-        double radius = outerRadius * (0.28D + 0.72D * (1.0D - progress));
-        Vec3 center = player.position().add(0.0D, 0.08D, 0.0D);
+        int enchantmentLevel = Math.max(0, visual.level);
+        double outerRadius = 1.65D + enchantmentLevel * 0.42D;
+        double focusRadius = outerRadius * (0.45D + 0.35D * (1.0D - progress));
+        Vec3 center = player.position().add(0.0D, 0.12D, 0.0D);
         RandomSource random = player.getRandom();
-        int cloudCount = 20 + Math.max(0, visual.level) * 7;
+        int moteCount = 4 + enchantmentLevel * 2;
         ParticleOptions dust = new DustParticleOptions(
                 Vec3.fromRGB24(chargeColor(visual.charge)).toVector3f(), full ? 1.45F : 1.0F);
 
-        for (int i = 0; i < cloudCount; i++) {
-            double y = random.nextDouble() * 2.0D - 1.0D;
-            double horizontal = Math.sqrt(Math.max(0.0D, 1.0D - y * y));
+        for (int i = 0; i < moteCount; i++) {
             double angle = random.nextDouble() * Math.PI * 2.0D;
-            double shell = radius * (0.62D + random.nextDouble() * 0.38D);
-            Vec3 offset = new Vec3(Math.cos(angle) * horizontal, y, Math.sin(angle) * horizontal).scale(shell);
-            Vec3 inward = offset.normalize().scale(-(0.055D + progress * 0.12D + visual.level * 0.006D));
+            double shell = focusRadius * (0.72D + random.nextDouble() * 0.28D);
+            double height = 0.08D + random.nextDouble() * (0.4D + player.getBbHeight() * 0.42D);
+            Vec3 offset = new Vec3(Math.cos(angle) * shell, height, Math.sin(angle) * shell);
+            Vec3 inward = new Vec3(-offset.x, -height * 0.18D, -offset.z).normalize()
+                    .scale(0.025D + progress * 0.055D);
             Vec3 point = center.add(offset);
-            level.addParticle(i % 4 == 0 ? ParticleTypes.LARGE_SMOKE : ParticleTypes.CLOUD,
-                    point.x, point.y, point.z, inward.x, inward.y, inward.z);
-            if (i % 5 == 0) {
-                level.addParticle(dust, point.x, point.y, point.z,
-                        inward.x * 0.4D, inward.y * 0.4D, inward.z * 0.4D);
-            }
+            ParticleOptions particle = switch (i & 3) {
+                case 0 -> ParticleTypes.END_ROD;
+                case 1 -> ParticleTypes.ENCHANT;
+                case 2 -> ParticleTypes.SOUL;
+                default -> dust;
+            };
+            level.addParticle(particle, point.x, point.y, point.z, inward.x, inward.y, inward.z);
         }
 
+        emitOrbitingSoulFlames(level, player, center, outerRadius, progress);
         if (((level.getGameTime() + player.getId()) & 1L) == 0L) {
             emitMagicCircle(level, player, visual, outerRadius, full, dust);
         }
         if (full) {
-            for (int i = 0; i < 12 + visual.level * 2; i++) {
+            for (int i = 0; i < 8 + enchantmentLevel * 2; i++) {
                 double angle = random.nextDouble() * Math.PI * 2.0D;
                 double distance = random.nextDouble() * outerRadius * 0.55D;
-                level.addParticle(ParticleTypes.TOTEM_OF_UNDYING,
+                ParticleOptions particle = i % 3 == 0
+                        ? ParticleTypes.SOUL_FIRE_FLAME
+                        : ParticleTypes.TOTEM_OF_UNDYING;
+                level.addParticle(particle,
                         center.x + Math.cos(angle) * distance, center.y + random.nextDouble() * 0.25D,
                         center.z + Math.sin(angle) * distance, 0.0D, 0.12D + random.nextDouble() * 0.12D, 0.0D);
             }
             if ((level.getGameTime() + player.getId()) % 6L == 0L) {
                 level.addParticle(ParticleTypes.FLASH, center.x, center.y + 0.2D, center.z,
                         0.0D, 0.0D, 0.0D);
+            }
+        }
+    }
+
+    private static void emitOrbitingSoulFlames(
+            ClientLevel level, Player player, Vec3 center, double radius, double progress) {
+        double rotation = level.getGameTime() * (0.11D + progress * 0.08D) + player.getId() * 0.37D;
+        for (int i = 0; i < 2; i++) {
+            double angle = rotation + Math.PI * i;
+            double height = 0.18D + Math.sin(rotation * 1.7D + i * Math.PI) * 0.09D;
+            Vec3 point = center.add(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
+            level.addParticle(ParticleTypes.SOUL_FIRE_FLAME,
+                    point.x, point.y, point.z, 0.0D, 0.012D, 0.0D);
+            if (((level.getGameTime() + i) & 1L) == 0L) {
+                double trailAngle = angle - 0.22D;
+                level.addParticle(ParticleTypes.SOUL,
+                        center.x + Math.cos(trailAngle) * radius, point.y + 0.04D,
+                        center.z + Math.sin(trailAngle) * radius, 0.0D, 0.018D, 0.0D);
             }
         }
     }
@@ -250,10 +274,10 @@ public final class ClientKickState {
             ParticleOptions dust) {
         Vec3 center = player.position().add(0.0D, 0.045D, 0.0D);
         int rings = full ? 3 : 2;
-        int points = 34 + visual.level * 6;
+        int points = 24 + visual.level * 3;
         double rotation = level.getGameTime() * (full ? 0.075D : 0.035D);
         for (int ring = 0; ring < rings; ring++) {
-            double ringRadius = outerRadius * (full ? 0.46D + ring * 0.24D : 0.68D + ring * 0.24D);
+            double ringRadius = outerRadius * (full ? 0.38D + ring * 0.25D : 0.64D + ring * 0.25D);
             double ringRotation = ring % 2 == 0 ? rotation : -rotation;
             for (int i = 0; i < points; i++) {
                 double angle = Math.PI * 2.0D * i / points + ringRotation;
@@ -261,74 +285,99 @@ public final class ClientKickState {
                 double z = center.z + Math.sin(angle) * ringRadius;
                 level.addParticle(dust, x, center.y, z, 0.0D, full ? 0.012D : 0.002D, 0.0D);
                 if (full && i % 4 == 0) {
-                    level.addParticle(ParticleTypes.ELECTRIC_SPARK, x, center.y + 0.02D, z,
+                    level.addParticle(i % 8 == 0 ? ParticleTypes.SOUL_FIRE_FLAME : ParticleTypes.ELECTRIC_SPARK,
+                            x, center.y + 0.02D, z,
                             0.0D, 0.035D, 0.0D);
                 }
             }
         }
 
-        int spokes = full ? 12 : 8;
-        int segments = 8 + visual.level;
-        for (int spoke = 0; spoke < spokes; spoke++) {
-            double angle = Math.PI * 2.0D * spoke / spokes - rotation;
-            for (int segment = 2; segment <= segments; segment++) {
-                double distance = outerRadius * 0.82D * segment / segments;
-                level.addParticle(dust,
-                        center.x + Math.cos(angle) * distance,
-                        center.y,
-                        center.z + Math.sin(angle) * distance,
-                        0.0D, full ? 0.01D : 0.0D, 0.0D);
+        int sigils = 5 + Math.max(0, visual.level) / 2;
+        for (int sigil = 0; sigil < sigils; sigil++) {
+            double angle = Math.PI * 2.0D * sigil / sigils - rotation;
+            Vec3 radial = new Vec3(Math.cos(angle), 0.0D, Math.sin(angle));
+            Vec3 tangent = new Vec3(-radial.z, 0.0D, radial.x);
+            for (int pointIndex = 0; pointIndex < 3; pointIndex++) {
+                double distance = outerRadius * (0.28D + pointIndex * 0.13D);
+                double bend = pointIndex == 1 ? outerRadius * 0.06D : 0.0D;
+                Vec3 point = center.add(radial.scale(distance)).add(tangent.scale(bend));
+                level.addParticle(pointIndex == 1 ? ParticleTypes.ELECTRIC_SPARK : dust,
+                        point.x, point.y, point.z, 0.0D, full ? 0.01D : 0.0D, 0.0D);
             }
         }
     }
 
     private static void emitFlightParticles(
             ClientLevel level, LivingEntity entity, KickedVisual visual) {
-        Vec3 current = entity.position();
-        Vec3 movement = visual.lastPosition == null
-                ? entity.getDeltaMovement()
-                : current.subtract(visual.lastPosition);
-        visual.lastPosition = current;
+        Vec3 current = entity.position().add(0.0D, entity.getBbHeight() * 0.5D, 0.0D);
+        Vec3 previous = visual.lastPosition;
+        Vec3 movement = previous == null ? entity.getDeltaMovement() : current.subtract(previous);
         if (movement.lengthSqr() > 1.0E-5D) {
             visual.lastDirection = movement.normalize();
-            visual.ringDistance += movement.length();
         }
+        visual.lastPosition = current;
 
         int tier = KickMath.flightEffectTier(visual.visualSpeed);
         if (tier == 0) {
             return;
         }
-        Vec3 center = current.add(0.0D, entity.getBbHeight() * 0.5D, 0.0D);
         int age = (int) (gameTime() - visual.startedAt);
         if (tier == 1) {
             if ((age & 1) == 0) {
-                spawnTrail(level, entity, visual, center, ParticleTypes.FIREWORK, 2, 0.45D);
+                spawnTrail(level, entity, visual, current, ParticleTypes.FIREWORK, 2, 0.45D);
             }
             return;
         }
         if (tier == 2) {
-            spawnTrail(level, entity, visual, center, ParticleTypes.FIREWORK, 7, 0.7D);
-            spawnTrail(level, entity, visual, center, ParticleTypes.SMOKE, 4, 0.55D);
+            spawnTrail(level, entity, visual, current, ParticleTypes.FIREWORK, 7, 0.7D);
+            spawnTrail(level, entity, visual, current, ParticleTypes.SMOKE, 4, 0.55D);
             return;
         }
         if (tier == 3) {
-            spawnTrail(level, entity, visual, center, ParticleTypes.FIREWORK, 12, 0.9D);
-            spawnTrail(level, entity, visual, center, ParticleTypes.CLOUD, 8, 0.85D);
-            spawnTrail(level, entity, visual, center, ParticleTypes.FLAME, 5, 0.7D);
+            spawnTrail(level, entity, visual, current, ParticleTypes.FIREWORK, 12, 0.9D);
+            spawnTrail(level, entity, visual, current, ParticleTypes.CLOUD, 8, 0.85D);
+            spawnTrail(level, entity, visual, current, ParticleTypes.FLAME, 5, 0.7D);
             return;
         }
 
-        spawnTrail(level, entity, visual, center, ParticleTypes.FIREWORK, 20, 1.25D);
-        spawnTrail(level, entity, visual, center, ParticleTypes.CLOUD, 14, 1.2D);
-        spawnTrail(level, entity, visual, center, ParticleTypes.FLAME, 9, 0.9D);
-        spawnTrail(level, entity, visual, center, ParticleTypes.SPLASH, 12, 1.3D);
+        spawnTrail(level, entity, visual, current, ParticleTypes.FIREWORK, 20, 1.25D);
+        spawnTrail(level, entity, visual, current, ParticleTypes.CLOUD, 14, 1.2D);
+        spawnTrail(level, entity, visual, current, ParticleTypes.FLAME, 9, 0.9D);
+        spawnTrail(level, entity, visual, current, ParticleTypes.SPLASH, 12, 1.3D);
         if ((age & 1) == 0) {
-            spawnTrail(level, entity, visual, center, ParticleTypes.CAMPFIRE_COSY_SMOKE, 5, 1.0D);
+            spawnTrail(level, entity, visual, current, ParticleTypes.CAMPFIRE_COSY_SMOKE, 5, 1.0D);
         }
-        if (visual.ringDistance >= 1.75D) {
-            visual.ringDistance %= 1.75D;
-            emitMachRing(level, center, visual.lastDirection);
+        double ringRadius = Math.max(1.05D, entity.getBbWidth() * 0.75D + entity.getBbHeight() * 0.2D);
+        if (previous == null) {
+            Vec3 estimatedStart = current.subtract(movement);
+            boolean emitted = emitMachRingsAlongSegment(level, estimatedStart, current, visual, ringRadius);
+            if (!emitted) {
+                emitMachRing(level, current.subtract(visual.lastDirection.scale(0.8D)),
+                        visual.lastDirection, ringRadius);
+            }
+        } else {
+            emitMachRingsAlongSegment(level, previous, current, visual, ringRadius);
         }
+    }
+
+    private static boolean emitMachRingsAlongSegment(
+            ClientLevel level, Vec3 start, Vec3 end, KickedVisual visual, double radius) {
+        Vec3 segment = end.subtract(start);
+        double length = segment.length();
+        if (length < 1.0E-4D) {
+            return false;
+        }
+        Vec3 direction = segment.normalize();
+        double interval = 1.75D;
+        double distance = interval - visual.ringDistance;
+        boolean emitted = false;
+        while (distance <= length + 1.0E-6D) {
+            emitMachRing(level, start.add(direction.scale(distance)), direction, radius);
+            distance += interval;
+            emitted = true;
+        }
+        visual.ringDistance = (visual.ringDistance + length) % interval;
+        return emitted;
     }
 
     private static void spawnTrail(
@@ -354,22 +403,26 @@ public final class ClientKickState {
         }
     }
 
-    private static void emitMachRing(ClientLevel level, Vec3 center, Vec3 direction) {
+    private static void emitMachRing(ClientLevel level, Vec3 center, Vec3 direction, double radius) {
         Vec3 first = direction.cross(new Vec3(0.0D, 1.0D, 0.0D));
         if (first.lengthSqr() < 1.0E-4D) {
             first = direction.cross(new Vec3(1.0D, 0.0D, 0.0D));
         }
         first = first.normalize();
         Vec3 second = direction.cross(first).normalize();
-        Vec3 ringCenter = center.subtract(direction.scale(0.9D));
         ParticleOptions dust = new DustParticleOptions(
                 Vec3.fromRGB24(0xC8F7FF).toVector3f(), 1.35F);
-        for (int i = 0; i < 36; i++) {
-            double angle = Math.PI * 2.0D * i / 36.0D;
+        for (int i = 0; i < 32; i++) {
+            double angle = Math.PI * 2.0D * i / 32.0D;
             Vec3 outward = first.scale(Math.cos(angle)).add(second.scale(Math.sin(angle)));
-            Vec3 point = ringCenter.add(outward.scale(1.05D));
-            level.addParticle(i % 3 == 0 ? ParticleTypes.CLOUD : dust,
+            Vec3 point = center.add(outward.scale(radius));
+            level.addParticle(ParticleTypes.CLOUD,
                     point.x, point.y, point.z, outward.x * 0.065D, outward.y * 0.065D, outward.z * 0.065D);
+            if ((i & 1) == 0) {
+                Vec3 inner = center.add(outward.scale(radius * 0.82D));
+                level.addParticle(dust, inner.x, inner.y, inner.z,
+                        outward.x * 0.035D, outward.y * 0.035D, outward.z * 0.035D);
+            }
         }
     }
 

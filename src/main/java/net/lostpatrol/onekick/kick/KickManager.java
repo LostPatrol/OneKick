@@ -18,6 +18,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySelector;
 import net.minecraft.world.entity.FlyingMob;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.FlyingAnimal;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
@@ -130,6 +131,13 @@ public final class KickManager {
         Vec3 currentPosition = entity.position();
         Vec3 currentVelocity = entity.getDeltaMovement();
         AABB currentBounds = entity.getBoundingBox();
+        Vec3 observedMovement = currentPosition.subtract(state.lastPosition);
+        if (state.age > 1
+                && observedMovement.lengthSqr() > 1.0E-6D
+                && !KickMath.isAlignedImpact(state.initialVelocity, observedMovement)) {
+            stopTracking(entity);
+            return;
+        }
         Entity entityCollision = state.age > 2
                 ? findEntityCollision(level, entity, state, currentPosition, currentBounds)
                 : null;
@@ -166,7 +174,7 @@ public final class KickManager {
             return;
         }
 
-        double speed = currentVelocity.length();
+        double speed = state.lastVelocity.length();
         state.slowTicks = speed < 0.12D ? state.slowTicks + 1 : 0;
         if (state.slowTicks >= 5 || state.spin && state.age > 4 && entity.onGround()) {
             stopTracking(entity);
@@ -174,7 +182,11 @@ public final class KickManager {
         }
         state.lastPosition = currentPosition;
         state.lastBounds = currentBounds;
-        state.lastVelocity = currentVelocity;
+        if (state.age > 1) {
+            state.lastVelocity = KickMath.nextFlightVelocity(
+                    state.lastVelocity, entity.isInWater(), entity.isNoGravity());
+        }
+        prepareFlightTick(entity, state.lastVelocity);
     }
 
     public static void removePlayer(ServerPlayer player) {
@@ -285,9 +297,6 @@ public final class KickManager {
         }
 
         Vec3 velocity = launchDirection.scale(launchSpeed);
-        target.setDeltaMovement(velocity);
-        target.hasImpulse = true;
-        target.hurtMarked = true;
         boolean spin = enchantments.angularMomentum() > 0
                 && look.y > 0.15D
                 && target.onGround()
@@ -295,8 +304,12 @@ public final class KickManager {
                 && !(target instanceof FlyingAnimal)
                 && !target.getType().is(ModTags.FLYING);
         KickSnapshot snapshot = new KickSnapshot(player.getUUID(), kickSpeed, enchantments, boots);
-        KICKED_ENTITIES.put(target.getUUID(), new KickedMotionState(
-                snapshot, target.position(), target.getBoundingBox(), velocity, spin, target.noPhysics));
+        boolean originalNoAi = target instanceof Mob mob && mob.isNoAi();
+        KickedMotionState motionState = new KickedMotionState(
+                snapshot, target.position(), target.getBoundingBox(), velocity, spin,
+                target.noPhysics, originalNoAi);
+        KICKED_ENTITIES.put(target.getUUID(), motionState);
+        prepareFlightTick(target, velocity);
         KickNetwork.broadcastKickedState(target, true, spin, (float) launchSpeed);
     }
 
@@ -319,9 +332,7 @@ public final class KickManager {
         state.lastVelocity = state.traversalDirection.scale(state.traversalSpeed);
         entity.noPhysics = true;
         entity.fallDistance = 0.0F;
-        entity.setDeltaMovement(state.lastVelocity);
-        entity.hasImpulse = true;
-        entity.hurtMarked = true;
+        applyControlledVelocity(entity, state.lastVelocity);
     }
 
     private static void tickTraversal(
@@ -356,9 +367,7 @@ public final class KickManager {
 
         entity.noPhysics = true;
         entity.fallDistance = 0.0F;
-        entity.setDeltaMovement(forcedVelocity);
-        entity.hasImpulse = true;
-        entity.hurtMarked = true;
+        applyControlledVelocity(entity, forcedVelocity);
         state.lastPosition = currentPosition;
         state.lastBounds = entity.getBoundingBox();
         state.lastVelocity = forcedVelocity;
@@ -468,10 +477,32 @@ public final class KickManager {
         food.setSaturation(Math.min(food.getSaturationLevel(), food.getFoodLevel()));
     }
 
+    private static void prepareFlightTick(LivingEntity entity, Vec3 velocity) {
+        if (entity instanceof Mob mob) {
+            mob.setNoAi(true);
+            mob.getNavigation().stop();
+            mob.setJumping(false);
+            mob.setXxa(0.0F);
+            mob.setYya(0.0F);
+            mob.setZza(0.0F);
+        }
+        applyControlledVelocity(entity, velocity);
+    }
+
+    private static void applyControlledVelocity(LivingEntity entity, Vec3 velocity) {
+        Vec3 inputVelocity = entity instanceof Mob ? velocity.scale(1.0D / 0.98D) : velocity;
+        entity.setDeltaMovement(inputVelocity);
+        entity.hasImpulse = true;
+        entity.hurtMarked = true;
+    }
+
     private static void stopTracking(LivingEntity entity) {
         KickedMotionState removed = KICKED_ENTITIES.remove(entity.getUUID());
         if (removed != null) {
             entity.noPhysics = removed.originalNoPhysics;
+            if (entity instanceof Mob mob) {
+                mob.setNoAi(removed.originalNoAi);
+            }
             KickNetwork.broadcastKickedState(entity, false, false, 0.0F);
         }
     }
@@ -504,6 +535,7 @@ public final class KickManager {
         private final KickSnapshot snapshot;
         private final boolean spin;
         private final boolean originalNoPhysics;
+        private final boolean originalNoAi;
         private final Vec3 initialVelocity;
         private final double visualSpeed;
         private Vec3 lastPosition;
@@ -523,13 +555,15 @@ public final class KickManager {
                 AABB lastBounds,
                 Vec3 lastVelocity,
                 boolean spin,
-                boolean originalNoPhysics) {
+                boolean originalNoPhysics,
+                boolean originalNoAi) {
             this.snapshot = snapshot;
             this.lastPosition = lastPosition;
             this.lastBounds = lastBounds;
             this.lastVelocity = lastVelocity;
             this.spin = spin;
             this.originalNoPhysics = originalNoPhysics;
+            this.originalNoAi = originalNoAi;
             this.initialVelocity = lastVelocity;
             this.visualSpeed = lastVelocity.length();
         }

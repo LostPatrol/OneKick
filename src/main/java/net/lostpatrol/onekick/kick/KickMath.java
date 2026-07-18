@@ -14,6 +14,10 @@ public final class KickMath {
     public static final double KICK_REACH = 3.5D;
     public static final int COOLDOWN_TICKS = 12;
     public static final float CHARGE_SPEED_MULTIPLIER = 6.0F;
+    private static final double CHARGE_QUADRATIC_COEFFICIENT = 1.0D / 15.0D;
+    private static final double PROJECTILE_AIR_DRAG = 0.99D;
+    private static final double PROJECTILE_WATER_DRAG = 0.8D;
+    private static final double PROJECTILE_GRAVITY = 0.03D;
     private static final double MIN_IMPACT_ALIGNMENT = Math.cos(Math.toRadians(35.0D));
 
     private KickMath() {
@@ -30,13 +34,16 @@ public final class KickMath {
             double equipmentMultiplier, double movementSpeed, double charge, int overloadLevel) {
         double safeEquipment = Double.isNaN(equipmentMultiplier) ? 1.0D : equipmentMultiplier;
         double safeMovement = nonNegative(movementSpeed);
-        double safeCharge = nonNegative(charge);
         int safeOverload = Math.max(0, overloadLevel);
-        double chargeMultiplier = 1.0D + safeCharge * 0.4D;
         double specialMultiplier = 1.0D + safeOverload * 0.55D;
         double speed = (BASE_SPEED * safeEquipment + safeMovement * MOVEMENT_SPEED_COEFFICIENT)
-                * chargeMultiplier * specialMultiplier;
+                * chargeMultiplier(charge) * specialMultiplier;
         return nonNegative(speed);
+    }
+
+    public static double chargeMultiplier(double charge) {
+        double safeCharge = nonNegative(charge);
+        return 1.0D + safeCharge * safeCharge * CHARGE_QUADRATIC_COEFFICIENT;
     }
 
     public static double equipmentMultiplier(ItemStack boots) {
@@ -87,6 +94,12 @@ public final class KickMath {
         return direction.add(0.0D, 0.12D, 0.0D).normalize();
     }
 
+    public static Vec3 nextFlightVelocity(Vec3 velocity, boolean inWater, boolean noGravity) {
+        double drag = inWater ? PROJECTILE_WATER_DRAG : PROJECTILE_AIR_DRAG;
+        Vec3 next = velocity.scale(drag);
+        return noGravity ? next : next.add(0.0D, -PROJECTILE_GRAVITY, 0.0D);
+    }
+
     public static float collisionDamage(double beforeSpeed, double afterSpeed, int overloadLevel) {
         double lostSpeed = Math.max(0.0D, beforeSpeed - afterSpeed);
         double vanillaLike = Math.max(0.0D, lostSpeed * 10.0D - 3.0D);
@@ -106,8 +119,8 @@ public final class KickMath {
     }
 
     public static double disintegrationRadius(double kickSpeed, boolean tripleSynergy) {
-        double radius = 0.75D + 1.25D * Math.log1p(Math.max(0.0D, kickSpeed));
-        return Math.max(1.0D, tripleSynergy ? radius * 1.45D : radius);
+        double radius = 1.0D + 1.65D * Math.log1p(Math.max(0.0D, kickSpeed));
+        return Math.max(1.0D, tripleSynergy ? radius * 1.55D : radius);
     }
 
     public static double disintegrationDepth(double kickSpeed, int overloadLevel) {
@@ -117,7 +130,7 @@ public final class KickMath {
 
     public static float explosionPower(double kickSpeed, int unstableLevel) {
         return (float) Math.max(1.0D,
-                0.9D + unstableLevel * 0.7D + Math.sqrt(Math.max(0.0D, kickSpeed)) * 0.5D);
+                0.9D + unstableLevel * 0.7D + Math.sqrt(Math.max(0.0D, kickSpeed)) * 0.75D);
     }
 
     public static boolean isAlignedImpact(Vec3 initialVelocity, Vec3 impactVelocity) {
