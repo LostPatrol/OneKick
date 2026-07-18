@@ -1,0 +1,13 @@
+{
+  "enchantment.onekick.reaction": "Reaction",
+  "enchantment.onekick.aerodynamics": "Aerodynamics",
+  "enchantment.onekick.disintegration": "Disintegration",
+  "enchantment.onekick.unstable_collision": "Unstable Collision",
+  "enchantment.onekick.kinetic_overload": "Kinetic Overload",
+  "enchantment.onekick.charge": "Charge",
+  "enchantment.onekick.angular_momentum": "Conservation of Angular Momentum",
+  "entity.onekick.impact_debris": "Impact Debris",
+  "key.onekick.kick": "Kick / Charge Kick",
+  "key.categories.onekick": "One Kick",
+  "message.onekick.cooldown": "Your kick is still cooling down"
+}

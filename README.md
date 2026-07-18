@@ -4,7 +4,16 @@
 
 One Kick is a Minecraft Forge mod built around one simple idea: kick things.
 
-The project is currently in early development. Its planned gameplay centers on kicking entities, using different boots to change kick strength, and unlocking special effects through enchantments.
+Press **R** to kick in the direction you are looking. The key can be changed in Minecraft's Controls menu. Your movement speed and boot quality affect kick strength, while a target's maximum health affects how far it is launched. A launched creature takes kinetic damage if it hits a wall.
+
+Boot enchantments expand the move:
+
+- **Reaction** and **Aerodynamics** turn kicks into movement tools.
+- **Charge** adds a hold-to-charge meter and trades hunger for power.
+- **Disintegration** and **Unstable Collision** break terrain or create explosions when a launched creature collides.
+- **Kinetic Overload** greatly raises speed and damage.
+- **Conservation of Angular Momentum** makes creatures kicked upward spin until they land.
+- Vanilla **Silk Touch** can be enchanted onto boots and preserves drops from kick-driven block destruction.
 
 ## Requirements
 
@@ -14,7 +23,7 @@ The project is currently in early development. Its planned gameplay centers on k
 
 ## Status
 
-The mod is not yet ready for normal gameplay. There is currently no published release.
+The core gameplay is available in development builds. There is currently no published release.
 
 ## License
 

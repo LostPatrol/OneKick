@@ -1,0 +1,13 @@
+{
+  "enchantment.onekick.reaction": "反作用",
+  "enchantment.onekick.aerodynamics": "空气动力学",
+  "enchantment.onekick.disintegration": "崩解",
+  "enchantment.onekick.unstable_collision": "不稳定碰撞",
+  "enchantment.onekick.kinetic_overload": "动能过载",
+  "enchantment.onekick.charge": "蓄力",
+  "enchantment.onekick.angular_momentum": "角动量守恒",
+  "entity.onekick.impact_debris": "冲击碎块",
+  "key.onekick.kick": "踢击 / 蓄力踢击",
+  "key.categories.onekick": "One Kick",
+  "message.onekick.cooldown": "踢击仍在冷却中"
+}
