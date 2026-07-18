@@ -5,6 +5,7 @@
   "enchantment.onekick.unstable_collision": "不稳定碰撞",
   "enchantment.onekick.kinetic_overload": "动能过载",
   "enchantment.onekick.charge": "蓄力",
+  "enchantment.onekick.overcharge": "超量充能",
   "enchantment.onekick.angular_momentum": "角动量守恒",
   "entity.onekick.impact_debris": "冲击碎块",
   "key.onekick.kick": "踢击 / 蓄力踢击",

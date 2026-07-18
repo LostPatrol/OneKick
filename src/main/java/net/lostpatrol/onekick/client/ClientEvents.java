@@ -87,6 +87,7 @@ public final class ClientEvents {
                 KickNetwork.sendInput(keyDown);
             }
             keyWasDown = keyDown;
+            ClientKickState.tickParticles(minecraft);
         }
 
         @SubscribeEvent(priority = EventPriority.HIGHEST)

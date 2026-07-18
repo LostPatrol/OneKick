@@ -21,7 +21,7 @@ public final class KickNetwork {
     public static final byte ANIMATION_CHARGE = 0;
     public static final byte ANIMATION_KICK = 1;
     public static final byte ANIMATION_STOP = 2;
-    private static final String PROTOCOL = "1";
+    private static final String PROTOCOL = "2";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(OneKick.MOD_ID, "main"),
             () -> PROTOCOL,
@@ -60,9 +60,21 @@ public final class KickNetwork {
         CHANNEL.sendToServer(new KickInputPacket(pressed));
     }
 
-    public static void sendChargeState(ServerPlayer player, boolean active, float charge, float maximum) {
-        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                new ChargeStatePacket(active, charge, maximum));
+    public static void broadcastChargeState(
+            ServerPlayer player, boolean active, float charge, float maximum, int chargeLevel) {
+        CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player),
+                new ChargeStatePacket(player.getId(), active, charge, maximum, chargeLevel));
+    }
+
+    public static void sendChargeState(
+            ServerPlayer receiver,
+            ServerPlayer chargingPlayer,
+            boolean active,
+            float charge,
+            float maximum,
+            int chargeLevel) {
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> receiver),
+                new ChargeStatePacket(chargingPlayer.getId(), active, charge, maximum, chargeLevel));
     }
 
     public static void broadcastPlayerAnimation(ServerPlayer player, byte animation) {
@@ -75,14 +87,16 @@ public final class KickNetwork {
                 new PlayerAnimationPacket(player.getId(), animation));
     }
 
-    public static void broadcastKickedState(LivingEntity entity, boolean active, boolean spin) {
+    public static void broadcastKickedState(
+            LivingEntity entity, boolean active, boolean spin, float visualSpeed) {
         CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> entity),
-                new KickedEntityPacket(entity.getId(), active, spin));
+                new KickedEntityPacket(entity.getId(), active, spin, visualSpeed));
     }
 
-    public static void sendKickedState(ServerPlayer receiver, LivingEntity entity, boolean active, boolean spin) {
+    public static void sendKickedState(
+            ServerPlayer receiver, LivingEntity entity, boolean active, boolean spin, float visualSpeed) {
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> receiver),
-                new KickedEntityPacket(entity.getId(), active, spin));
+                new KickedEntityPacket(entity.getId(), active, spin, visualSpeed));
     }
 
     private static void handleInput(KickInputPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -95,7 +109,8 @@ public final class KickNetwork {
     private static void handleChargeState(
             ChargeStatePacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                ClientKickState.updateCharge(packet.active(), packet.charge(), packet.maximum()));
+                ClientKickState.updateCharge(packet.entityId(), packet.active(), packet.charge(),
+                        packet.maximum(), packet.chargeLevel()));
     }
 
     private static void handlePlayerAnimation(
@@ -107,7 +122,8 @@ public final class KickNetwork {
     private static void handleKickedEntity(
             KickedEntityPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                ClientKickState.updateKickedEntity(packet.entityId(), packet.active(), packet.spin()));
+                ClientKickState.updateKickedEntity(
+                        packet.entityId(), packet.active(), packet.spin(), packet.visualSpeed()));
     }
 
     private record KickInputPacket(boolean pressed) {
@@ -120,15 +136,19 @@ public final class KickNetwork {
         }
     }
 
-    private record ChargeStatePacket(boolean active, float charge, float maximum) {
+    private record ChargeStatePacket(
+            int entityId, boolean active, float charge, float maximum, int chargeLevel) {
         private static void encode(ChargeStatePacket packet, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(packet.entityId);
             buffer.writeBoolean(packet.active);
             buffer.writeFloat(packet.charge);
             buffer.writeFloat(packet.maximum);
+            buffer.writeVarInt(packet.chargeLevel);
         }
 
         private static ChargeStatePacket decode(FriendlyByteBuf buffer) {
-            return new ChargeStatePacket(buffer.readBoolean(), buffer.readFloat(), buffer.readFloat());
+            return new ChargeStatePacket(buffer.readVarInt(), buffer.readBoolean(), buffer.readFloat(),
+                    buffer.readFloat(), buffer.readVarInt());
         }
     }
 
@@ -143,15 +163,17 @@ public final class KickNetwork {
         }
     }
 
-    private record KickedEntityPacket(int entityId, boolean active, boolean spin) {
+    private record KickedEntityPacket(int entityId, boolean active, boolean spin, float visualSpeed) {
         private static void encode(KickedEntityPacket packet, FriendlyByteBuf buffer) {
             buffer.writeVarInt(packet.entityId);
             buffer.writeBoolean(packet.active);
             buffer.writeBoolean(packet.spin);
+            buffer.writeFloat(packet.visualSpeed);
         }
 
         private static KickedEntityPacket decode(FriendlyByteBuf buffer) {
-            return new KickedEntityPacket(buffer.readVarInt(), buffer.readBoolean(), buffer.readBoolean());
+            return new KickedEntityPacket(
+                    buffer.readVarInt(), buffer.readBoolean(), buffer.readBoolean(), buffer.readFloat());
         }
     }
 }

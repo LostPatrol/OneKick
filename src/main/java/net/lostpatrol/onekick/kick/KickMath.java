@@ -14,6 +14,7 @@ public final class KickMath {
     public static final double KICK_REACH = 3.5D;
     public static final int COOLDOWN_TICKS = 12;
     public static final float CHARGE_SPEED_MULTIPLIER = 6.0F;
+    private static final double MIN_IMPACT_ALIGNMENT = Math.cos(Math.toRadians(35.0D));
 
     private KickMath() {
     }
@@ -86,20 +87,14 @@ public final class KickMath {
         return direction.add(0.0D, 0.12D, 0.0D).normalize();
     }
 
-    public static float directDamage(double kickSpeed, float charge, int overloadLevel) {
-        double chargedDamage = charge >= 1.5F ? Math.max(0.0D, kickSpeed - 1.5D) * 0.8D : 0.0D;
-        double overloadDamage = overloadLevel > 0 ? kickSpeed * overloadLevel * 0.7D : 0.0D;
-        return (float) nonNegative(chargedDamage + overloadDamage);
-    }
-
     public static float collisionDamage(double beforeSpeed, double afterSpeed, int overloadLevel) {
         double lostSpeed = Math.max(0.0D, beforeSpeed - afterSpeed);
         double vanillaLike = Math.max(0.0D, lostSpeed * 10.0D - 3.0D);
         return (float) nonNegative(vanillaLike * (1.0D + overloadLevel * 1.25D));
     }
 
-    public static float maxCharge(int level) {
-        return level <= 0 ? 0.0F : 1.0F + level;
+    public static float maxCharge(int level, int overchargeLevel) {
+        return level <= 0 ? 0.0F : (1.0F + level) * (Math.max(0, overchargeLevel) + 1.0F);
     }
 
     public static float chargePerTick(int level) {
@@ -123,6 +118,43 @@ public final class KickMath {
     public static float explosionPower(double kickSpeed, int unstableLevel) {
         return (float) Math.max(1.0D,
                 0.9D + unstableLevel * 0.7D + Math.sqrt(Math.max(0.0D, kickSpeed)) * 0.5D);
+    }
+
+    public static boolean isAlignedImpact(Vec3 initialVelocity, Vec3 impactVelocity) {
+        if (initialVelocity.lengthSqr() < 1.0E-6D || impactVelocity.lengthSqr() < 1.0E-6D) {
+            return false;
+        }
+        return initialVelocity.normalize().dot(impactVelocity.normalize()) >= MIN_IMPACT_ALIGNMENT;
+    }
+
+    public static double impactTraversalDistance(
+            double kickSpeed, int disintegrationLevel, int unstableLevel, int overloadLevel) {
+        if (disintegrationLevel > 0 && (unstableLevel <= 0 || overloadLevel > 0)) {
+            return disintegrationDepth(kickSpeed, overloadLevel);
+        }
+        return unstableLevel > 0 ? Math.max(2.0D, explosionPower(kickSpeed, unstableLevel) * 1.35D) : 0.0D;
+    }
+
+    public static float traversalDamage(double impactSpeed, int overloadLevel) {
+        return (float) Math.max(1.0D,
+                nonNegative(impactSpeed) * 1.25D * (1.0D + Math.max(0, overloadLevel) * 0.35D));
+    }
+
+    public static int flightEffectTier(double launchSpeed) {
+        double speed = nonNegative(launchSpeed);
+        if (speed < 0.65D) {
+            return 0;
+        }
+        if (speed < 1.25D) {
+            return 1;
+        }
+        if (speed < 2.25D) {
+            return 2;
+        }
+        if (speed < 3.25D) {
+            return 3;
+        }
+        return 4;
     }
 
     private static double nonNegative(double value) {

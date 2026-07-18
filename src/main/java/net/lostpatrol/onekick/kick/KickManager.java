@@ -9,6 +9,7 @@ import javax.annotation.Nullable;
 import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModTags;
 import net.lostpatrol.onekick.world.BlockImpactService;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -53,7 +54,8 @@ public final class KickManager {
                 return;
             }
             ItemStack boots = player.getItemBySlot(EquipmentSlot.FEET);
-            int chargeLevel = KickEnchantments.from(boots).charge();
+            KickEnchantments enchantments = KickEnchantments.from(boots);
+            int chargeLevel = enchantments.charge();
             if (chargeLevel <= 0) {
                 performKick(player, 0.0F);
                 return;
@@ -62,8 +64,10 @@ public final class KickManager {
             state.charge = 0.0F;
             state.chargeFoodDebt = 0.0F;
             state.chargeLevel = chargeLevel;
-            state.chargeMaximum = KickMath.maxCharge(chargeLevel);
-            KickNetwork.sendChargeState(player, true, 0.0F, state.chargeMaximum);
+            state.overchargeLevel = enchantments.overcharge();
+            state.chargeMaximum = KickMath.maxCharge(chargeLevel, state.overchargeLevel);
+            KickNetwork.broadcastChargeState(
+                    player, true, 0.0F, state.chargeMaximum, state.chargeLevel);
             KickNetwork.broadcastPlayerAnimation(player, KickNetwork.ANIMATION_CHARGE);
         } else if (state.charging) {
             releaseCharge(player, state);
@@ -83,22 +87,25 @@ public final class KickManager {
         }
 
         ItemStack boots = player.getItemBySlot(EquipmentSlot.FEET);
-        int currentLevel = KickEnchantments.from(boots).charge();
-        if (!player.isAlive() || currentLevel != state.chargeLevel) {
+        KickEnchantments currentEnchantments = KickEnchantments.from(boots);
+        if (!player.isAlive()
+                || currentEnchantments.charge() != state.chargeLevel
+                || currentEnchantments.overcharge() != state.overchargeLevel) {
             cancelCharge(player, state);
             return;
         }
-        if (canGrowCharge(player)) {
-            float increase = KickMath.chargePerTick(state.chargeLevel);
+        if (state.charge < state.chargeMaximum && canGrowCharge(player)) {
+            float increase = Math.min(
+                    KickMath.chargePerTick(state.chargeLevel), state.chargeMaximum - state.charge);
             state.charge += increase;
             if (!player.getAbilities().instabuild) {
                 state.chargeFoodDebt += KickMath.chargeFoodCost(increase);
                 consumeChargeFood(player, state);
             }
         }
-        KickEffects.emitCharge(player, state.charge, state.chargeMaximum, state.chargeLevel);
         if ((player.tickCount & 1) == 0) {
-            KickNetwork.sendChargeState(player, true, state.charge, state.chargeMaximum);
+            KickNetwork.broadcastChargeState(
+                    player, true, state.charge, state.chargeMaximum, state.chargeLevel);
         }
     }
 
@@ -115,6 +122,10 @@ public final class KickManager {
             stopTracking(entity);
             return;
         }
+        if (state.traversing) {
+            tickTraversal(level, entity, state);
+            return;
+        }
 
         Vec3 currentPosition = entity.position();
         Vec3 currentVelocity = entity.getDeltaMovement();
@@ -126,6 +137,10 @@ public final class KickManager {
                 || entity.verticalCollision && Math.abs(state.lastVelocity.y) > 0.35D);
 
         if (blockCollision || entityCollision != null) {
+            if (!KickMath.isAlignedImpact(state.initialVelocity, state.lastVelocity)) {
+                stopTracking(entity);
+                return;
+            }
             double beforeSpeed = state.lastVelocity.length();
             double afterSpeed = currentVelocity.length();
             float damage = KickMath.collisionDamage(beforeSpeed, afterSpeed,
@@ -140,18 +155,18 @@ public final class KickManager {
             Vec3 impact = entityCollision == null
                     ? findBlockImpact(level, entity, state.lastVelocity)
                     : entityCollision.getBoundingBox().getCenter();
-            BlockImpactService.handleImpact(level, impact, state.lastVelocity, state.snapshot);
+            BlockImpactService.handleImpact(level, entity, impact, state.lastVelocity, state.snapshot);
+            KickEnchantments enchantments = state.snapshot.enchantments();
+            if (entity.isAlive()
+                    && (enchantments.disintegration() > 0 || enchantments.unstableCollision() > 0)) {
+                startTraversal(entity, state, state.lastVelocity, beforeSpeed);
+                return;
+            }
             stopTracking(entity);
             return;
         }
 
         double speed = currentVelocity.length();
-        state.ringDistance += currentPosition.distanceTo(state.lastPosition);
-        boolean emitMachRing = speed >= 3.35D && state.ringDistance >= 2.0D;
-        if (emitMachRing) {
-            state.ringDistance %= 2.0D;
-        }
-        KickEffects.emitTrail(level, entity, speed, state.age, emitMachRing);
         state.slowTicks = speed < 0.12D ? state.slowTicks + 1 : 0;
         if (state.slowTicks >= 5 || state.spin && state.age > 4 && entity.onGround()) {
             stopTracking(entity);
@@ -165,7 +180,7 @@ public final class KickManager {
     public static void removePlayer(ServerPlayer player) {
         PlayerKickState state = PLAYER_STATES.remove(player.getUUID());
         if (state != null && state.charging) {
-            KickNetwork.sendChargeState(player, false, 0.0F, 0.0F);
+            KickNetwork.broadcastChargeState(player, false, 0.0F, 0.0F, 0);
             KickNetwork.broadcastPlayerAnimation(player, KickNetwork.ANIMATION_STOP);
         }
     }
@@ -178,12 +193,15 @@ public final class KickManager {
         if (target instanceof LivingEntity living) {
             KickedMotionState kicked = KICKED_ENTITIES.get(living.getUUID());
             if (kicked != null) {
-                KickNetwork.sendKickedState(observer, living, true, kicked.spin);
+                KickNetwork.sendKickedState(
+                        observer, living, true, kicked.spin, (float) kicked.visualSpeed);
             }
         }
         if (target instanceof ServerPlayer trackedPlayer) {
             PlayerKickState playerState = PLAYER_STATES.get(trackedPlayer.getUUID());
             if (playerState != null && playerState.charging) {
+                KickNetwork.sendChargeState(observer, trackedPlayer, true, playerState.charge,
+                        playerState.chargeMaximum, playerState.chargeLevel);
                 KickNetwork.sendPlayerAnimation(observer, trackedPlayer, KickNetwork.ANIMATION_CHARGE);
             }
         }
@@ -208,7 +226,8 @@ public final class KickManager {
         state.charging = false;
         state.charge = 0.0F;
         state.chargeFoodDebt = 0.0F;
-        KickNetwork.sendChargeState(player, false, 0.0F, state.chargeMaximum);
+        KickNetwork.broadcastChargeState(
+                player, false, 0.0F, state.chargeMaximum, state.chargeLevel);
         performKick(player, effectiveCharge);
     }
 
@@ -216,7 +235,7 @@ public final class KickManager {
         state.charging = false;
         state.charge = 0.0F;
         state.chargeFoodDebt = 0.0F;
-        KickNetwork.sendChargeState(player, false, 0.0F, 0.0F);
+        KickNetwork.broadcastChargeState(player, false, 0.0F, 0.0F, 0);
         KickNetwork.broadcastPlayerAnimation(player, KickNetwork.ANIMATION_STOP);
     }
 
@@ -234,7 +253,7 @@ public final class KickManager {
                 && target.isAlive()
                 && !(target instanceof EnderDragon)
                 && !target.getType().is(ModTags.KICK_IMMUNE)) {
-            kickEntity(player, target, boots, enchantments, kickSpeed, charge);
+            kickEntity(player, target, boots, enchantments, kickSpeed);
             return;
         }
 
@@ -253,15 +272,11 @@ public final class KickManager {
             LivingEntity target,
             ItemStack boots,
             KickEnchantments enchantments,
-            double kickSpeed,
-            float charge) {
+            double kickSpeed) {
+        stopTracking(target);
         Vec3 look = player.getLookAngle().normalize();
         Vec3 launchDirection = KickMath.launchDirection(look);
         double launchSpeed = KickMath.launchSpeed(kickSpeed, target);
-        float directDamage = KickMath.directDamage(kickSpeed, charge, enchantments.kineticOverload());
-        if (directDamage > 0.0F) {
-            target.hurt(target.damageSources().playerAttack(player), directDamage);
-        }
         if (enchantments.reaction() > 0) {
             applyEntityReaction(player, look, kickSpeed);
         }
@@ -281,8 +296,72 @@ public final class KickManager {
                 && !target.getType().is(ModTags.FLYING);
         KickSnapshot snapshot = new KickSnapshot(player.getUUID(), kickSpeed, enchantments, boots);
         KICKED_ENTITIES.put(target.getUUID(), new KickedMotionState(
-                snapshot, target.position(), target.getBoundingBox(), velocity, spin));
-        KickNetwork.broadcastKickedState(target, true, spin);
+                snapshot, target.position(), target.getBoundingBox(), velocity, spin, target.noPhysics));
+        KickNetwork.broadcastKickedState(target, true, spin, (float) launchSpeed);
+    }
+
+    private static void startTraversal(
+            LivingEntity entity, KickedMotionState state, Vec3 impactVelocity, double impactSpeed) {
+        KickEnchantments enchantments = state.snapshot.enchantments();
+        double distance = KickMath.impactTraversalDistance(
+                state.snapshot.kickSpeed(), enchantments.disintegration(),
+                enchantments.unstableCollision(), enchantments.kineticOverload());
+        if (distance <= 0.0D || impactVelocity.lengthSqr() < 1.0E-6D) {
+            stopTracking(entity);
+            return;
+        }
+        state.traversing = true;
+        state.traversalDirection = impactVelocity.normalize();
+        state.traversalRemaining = distance;
+        state.traversalSpeed = Math.max(0.35D, impactSpeed);
+        state.lastPosition = entity.position();
+        state.lastBounds = entity.getBoundingBox();
+        state.lastVelocity = state.traversalDirection.scale(state.traversalSpeed);
+        entity.noPhysics = true;
+        entity.fallDistance = 0.0F;
+        entity.setDeltaMovement(state.lastVelocity);
+        entity.hasImpulse = true;
+        entity.hurtMarked = true;
+    }
+
+    private static void tickTraversal(
+            ServerLevel level, LivingEntity entity, KickedMotionState state) {
+        Vec3 currentPosition = entity.position();
+        state.traversalRemaining -= currentPosition.distanceTo(state.lastPosition);
+        if (state.traversalRemaining <= 1.0E-3D) {
+            entity.setDeltaMovement(Vec3.ZERO);
+            stopTracking(entity);
+            return;
+        }
+
+        double forcedSpeed = Math.min(state.traversalSpeed, state.traversalRemaining);
+        Vec3 forcedVelocity = state.traversalDirection.scale(forcedSpeed);
+        BlockPos nextPosition = BlockPos.containing(currentPosition.add(forcedVelocity));
+        if (!level.hasChunkAt(nextPosition)) {
+            entity.setDeltaMovement(Vec3.ZERO);
+            stopTracking(entity);
+            return;
+        }
+
+        state.traversalTicks++;
+        if (state.traversalTicks % 3 == 0) {
+            float damage = KickMath.traversalDamage(
+                    state.traversalSpeed, state.snapshot.enchantments().kineticOverload());
+            entity.hurt(level.damageSources().flyIntoWall(), damage);
+            if (!entity.isAlive()) {
+                stopTracking(entity);
+                return;
+            }
+        }
+
+        entity.noPhysics = true;
+        entity.fallDistance = 0.0F;
+        entity.setDeltaMovement(forcedVelocity);
+        entity.hasImpulse = true;
+        entity.hurtMarked = true;
+        state.lastPosition = currentPosition;
+        state.lastBounds = entity.getBoundingBox();
+        state.lastVelocity = forcedVelocity;
     }
 
     private static void applyBlockReaction(ServerPlayer player, double kickSpeed) {
@@ -392,7 +471,8 @@ public final class KickManager {
     private static void stopTracking(LivingEntity entity) {
         KickedMotionState removed = KICKED_ENTITIES.remove(entity.getUUID());
         if (removed != null) {
-            KickNetwork.broadcastKickedState(entity, false, false);
+            entity.noPhysics = removed.originalNoPhysics;
+            KickNetwork.broadcastKickedState(entity, false, false, 0.0F);
         }
     }
 
@@ -414,6 +494,7 @@ public final class KickManager {
         private int airUses;
         private boolean charging;
         private int chargeLevel;
+        private int overchargeLevel;
         private float charge;
         private float chargeMaximum;
         private float chargeFoodDebt;
@@ -422,24 +503,35 @@ public final class KickManager {
     private static final class KickedMotionState {
         private final KickSnapshot snapshot;
         private final boolean spin;
+        private final boolean originalNoPhysics;
+        private final Vec3 initialVelocity;
+        private final double visualSpeed;
         private Vec3 lastPosition;
         private AABB lastBounds;
         private Vec3 lastVelocity;
         private int age;
         private int slowTicks;
-        private double ringDistance;
+        private boolean traversing;
+        private Vec3 traversalDirection = Vec3.ZERO;
+        private double traversalRemaining;
+        private double traversalSpeed;
+        private int traversalTicks;
 
         private KickedMotionState(
                 KickSnapshot snapshot,
                 Vec3 lastPosition,
                 AABB lastBounds,
                 Vec3 lastVelocity,
-                boolean spin) {
+                boolean spin,
+                boolean originalNoPhysics) {
             this.snapshot = snapshot;
             this.lastPosition = lastPosition;
             this.lastBounds = lastBounds;
             this.lastVelocity = lastVelocity;
             this.spin = spin;
+            this.originalNoPhysics = originalNoPhysics;
+            this.initialVelocity = lastVelocity;
+            this.visualSpeed = lastVelocity.length();
         }
     }
 }

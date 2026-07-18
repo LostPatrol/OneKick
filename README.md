@@ -9,7 +9,7 @@ Press **R** to kick in the direction you are looking. The key can be changed in 
 Boot enchantments expand the move:
 
 - **Reaction** and **Aerodynamics** turn kicks into movement tools.
-- **Charge** adds a hold-to-charge meter and trades hunger for power.
+- **Charge** adds a hold-to-charge meter and trades hunger for power; the very rare **Overcharge** enchantment multiplies its maximum charge.
 - **Disintegration** and **Unstable Collision** break terrain or create explosions when a launched creature collides.
 - **Kinetic Overload** greatly raises speed and damage.
 - **Conservation of Angular Momentum** makes creatures kicked upward spin until they land.
@@ -25,7 +25,7 @@ Boot enchantments expand the move:
 
 The core gameplay is available in development builds. There is currently no published release.
 
-The current tuning build intentionally leaves charge, kick, and terrain-destruction upper bounds uncapped. Back up test worlds before experimenting with extreme values.
+Charge stops at its enchantment-defined maximum, while **Overcharge I–II** multiplies that maximum by 2–3. The current tuning build still leaves kick and terrain-destruction upper bounds uncapped, so back up test worlds before experimenting with extreme values.
 
 ## License
 

@@ -35,6 +35,8 @@ public final class ModEnchantments {
             "charge", Enchantment.Rarity.UNCOMMON, 5, 12, 7);
     public static final RegistryObject<Enchantment> ANGULAR_MOMENTUM = register(
             "angular_momentum", Enchantment.Rarity.UNCOMMON, 1, 18, 12);
+    public static final RegistryObject<Enchantment> OVERCHARGE = register(
+            "overcharge", Enchantment.Rarity.VERY_RARE, 2, 32, 18);
 
     private ModEnchantments() {
     }

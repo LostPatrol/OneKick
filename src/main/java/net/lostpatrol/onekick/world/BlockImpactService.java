@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+import java.util.UUID;
+import javax.annotation.Nullable;
 import net.lostpatrol.onekick.kick.KickEnchantments;
 import net.lostpatrol.onekick.kick.KickMath;
 import net.lostpatrol.onekick.kick.KickSnapshot;
@@ -15,7 +17,9 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Explosion;
 import net.minecraft.world.level.Level;
@@ -33,19 +37,25 @@ public final class BlockImpactService {
     private BlockImpactService() {
     }
 
-    public static void handleImpact(ServerLevel level, Vec3 impact, Vec3 movement, KickSnapshot snapshot) {
+    public static void handleImpact(
+            ServerLevel level,
+            LivingEntity impactedEntity,
+            Vec3 impact,
+            Vec3 movement,
+            KickSnapshot snapshot) {
         KickEnchantments enchantments = snapshot.enchantments();
         boolean hasDisintegration = enchantments.disintegration() > 0;
         boolean hasExplosion = enchantments.unstableCollision() > 0;
         boolean tripleSynergy = hasDisintegration && hasExplosion && enchantments.kineticOverload() > 0;
 
         if (tripleSynergy) {
-            scheduleExplosionChain(level, impact, movement, snapshot);
+            destroyCylinder(level, impact, movement, snapshot, true);
+            scheduleExplosionChain(level, impactedEntity, impact, movement, snapshot);
             return;
         }
         if (hasExplosion) {
             float power = KickMath.explosionPower(snapshot.kickSpeed(), enchantments.unstableCollision());
-            explode(level, impact, power, hasDisintegration, snapshot);
+            explode(level, impactedEntity, impact, movement, power, hasDisintegration, snapshot);
             return;
         }
         if (hasDisintegration) {
@@ -64,7 +74,9 @@ public final class BlockImpactService {
             iterator.remove();
             ServerLevel level = server.getLevel(scheduled.dimension());
             if (level != null && level.hasChunkAt(BlockPos.containing(scheduled.position()))) {
-                explode(level, scheduled.position(), scheduled.power(), true, scheduled.snapshot());
+                Entity excluded = level.getEntity(scheduled.excludedEntityId());
+                explode(level, excluded, scheduled.position(), scheduled.movement(),
+                        scheduled.power(), false, scheduled.snapshot());
             }
         }
     }
@@ -74,7 +86,11 @@ public final class BlockImpactService {
     }
 
     private static void scheduleExplosionChain(
-            ServerLevel level, Vec3 impact, Vec3 movement, KickSnapshot snapshot) {
+            ServerLevel level,
+            LivingEntity impactedEntity,
+            Vec3 impact,
+            Vec3 movement,
+            KickSnapshot snapshot) {
         Vec3 axis = safeDirection(movement);
         double depth = KickMath.disintegrationDepth(
                 snapshot.kickSpeed(), snapshot.enchantments().kineticOverload());
@@ -85,32 +101,34 @@ public final class BlockImpactService {
         for (int i = 0; i < count; i++) {
             double distance = count == 1 ? 0.0D : depth * i / (count - 1.0D);
             SCHEDULED_EXPLOSIONS.add(new ScheduledExplosion(
-                    level.dimension(), now + i * 2L, impact.add(axis.scale(distance)), power, snapshot));
+                    level.dimension(), now + i * 2L, impact.add(axis.scale(distance)),
+                    movement, power, impactedEntity.getUUID(), snapshot));
         }
     }
 
     private static void explode(
-            ServerLevel level, Vec3 position, float power, boolean destroyBlocks, KickSnapshot snapshot) {
+            ServerLevel level,
+            @Nullable Entity excludedEntity,
+            Vec3 position,
+            Vec3 movement,
+            float power,
+            boolean destroyBlocks,
+            KickSnapshot snapshot) {
         ServerPlayer attacker = snapshot.attacker(level);
-        Entity source = attacker;
-        if (!destroyBlocks) {
-            level.explode(source, position.x, position.y, position.z, power, Level.ExplosionInteraction.NONE);
+        DamageSource damageSource = attacker == null
+                ? level.damageSources().explosion(null, null)
+                : level.damageSources().explosion(attacker, attacker);
+        Explosion visualExplosion = new Explosion(level, excludedEntity, damageSource, null,
+                position.x, position.y, position.z, power, false, Explosion.BlockInteraction.KEEP);
+        if (ForgeEventFactory.onExplosionStart(level, visualExplosion)) {
             return;
         }
-        if (snapshot.enchantments().silkTouch()) {
-            Explosion visualExplosion = new Explosion(level, source, position.x, position.y, position.z, power,
-                    false, Explosion.BlockInteraction.KEEP);
-            if (ForgeEventFactory.onExplosionStart(level, visualExplosion)) {
-                return;
-            }
-            visualExplosion.explode();
-            visualExplosion.finalizeExplosion(false);
-            sendExplosionPacket(level, position, power, visualExplosion);
-            destroySphere(level, position, power * 1.35D, snapshot);
-            return;
+        visualExplosion.explode();
+        visualExplosion.finalizeExplosion(false);
+        sendExplosionPacket(level, position, power, visualExplosion);
+        if (destroyBlocks) {
+            destroySphere(level, position, movement, power * 1.35D, snapshot);
         }
-
-        level.explode(source, position.x, position.y, position.z, power, Level.ExplosionInteraction.BLOCK);
     }
 
     private static void sendExplosionPacket(
@@ -157,11 +175,12 @@ public final class BlockImpactService {
             }
         }
         candidates.sort(Comparator.comparingDouble(BlockCandidate::distance));
-        affectBlocks(level, impact, axis, snapshot, candidates.stream().map(BlockCandidate::pos).toList());
+        affectBlocks(level, impact, axis, movement.length(), snapshot,
+                candidates.stream().map(BlockCandidate::pos).toList());
     }
 
     private static void destroySphere(
-            ServerLevel level, Vec3 center, double radius, KickSnapshot snapshot) {
+            ServerLevel level, Vec3 center, Vec3 movement, double radius, KickSnapshot snapshot) {
         int blockRadius = Mth.ceil(radius);
         BlockPos origin = BlockPos.containing(center);
         List<BlockPos> candidates = new ArrayList<>();
@@ -172,13 +191,14 @@ public final class BlockImpactService {
             }
         }
         candidates.sort(Comparator.comparingDouble(pos -> Vec3.atCenterOf(pos).distanceToSqr(center)));
-        affectBlocks(level, center, Vec3.ZERO, snapshot, candidates);
+        affectBlocks(level, center, safeDirection(movement), movement.length(), snapshot, candidates);
     }
 
     private static void affectBlocks(
             ServerLevel level,
             Vec3 impact,
             Vec3 direction,
+            double impactSpeed,
             KickSnapshot snapshot,
             List<BlockPos> candidates) {
         ServerPlayer attacker = snapshot.attacker(level);
@@ -202,17 +222,28 @@ public final class BlockImpactService {
             boolean animate = !state.is(ModTags.DISINTEGRATION_DIRECT)
                     && !state.hasBlockEntity()
                     && state.getDestroySpeed(level, pos) <= 4.0F
-                    && level.random.nextFloat() < 0.45F;
+                    && level.random.nextFloat() < 0.65F;
             if (animate) {
-                Vec3 away = Vec3.atCenterOf(pos).subtract(impact);
-                if (away.lengthSqr() < 1.0E-4D) {
-                    away = direction.lengthSqr() > 0.0D ? direction : new Vec3(0.0D, 1.0D, 0.0D);
+                Vec3 normalizedDirection = safeDirection(direction);
+                Vec3 relative = Vec3.atCenterOf(pos).subtract(impact);
+                double along = relative.dot(normalizedDirection);
+                Vec3 radial = relative.subtract(normalizedDirection.scale(along));
+                if (radial.lengthSqr() > 1.0E-4D) {
+                    radial = radial.normalize();
                 }
-                away = away.normalize();
-                double strength = 0.22D + snapshot.kickSpeed() * 0.045D;
-                Vec3 velocity = away.scale(strength)
-                        .add(direction.scale(0.12D))
-                        .add(0.0D, 0.22D + level.random.nextDouble() * 0.25D, 0.0D);
+                Vec3 scatter = new Vec3(
+                        level.random.nextDouble() - 0.5D,
+                        level.random.nextDouble() - 0.5D,
+                        level.random.nextDouble() - 0.5D).scale(0.28D);
+                Vec3 flightDirection = normalizedDirection.scale(-1.0D)
+                        .add(radial.scale(0.42D))
+                        .add(scatter);
+                if (flightDirection.lengthSqr() < 1.0E-4D) {
+                    flightDirection = normalizedDirection.scale(-1.0D);
+                }
+                double strength = 0.24D + Math.max(0.0D, impactSpeed)
+                        * (0.11D + level.random.nextDouble() * 0.035D);
+                Vec3 velocity = flightDirection.normalize().scale(strength);
                 ImpactDebrisEntity.launch(level, pos, state, velocity, attacker,
                         silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop);
             } else {
@@ -262,7 +293,9 @@ public final class BlockImpactService {
             ResourceKey<Level> dimension,
             long dueTick,
             Vec3 position,
+            Vec3 movement,
             float power,
+            UUID excludedEntityId,
             KickSnapshot snapshot) {
     }
 }
