@@ -1,12 +1,15 @@
 package net.lostpatrol.onekick.client;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import net.lostpatrol.onekick.kick.KickMath;
 import net.lostpatrol.onekick.network.KickNetwork;
+import net.lostpatrol.onekick.registry.ModParticleTypes;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -26,6 +29,14 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
 public final class ClientKickState {
+    private static final double MACH_RING_RADIUS_MULTIPLIER = 2.4D;
+    private static final double MACH_RING_START_DISTANCE = 4.0D;
+    private static final double MACH_RING_INTERVAL = 21.375D;
+    private static final int MACH_RING_MIN_POINTS = 40;
+    private static final int MACH_RING_MAX_POINTS = 144;
+    private static final int MACH_RING_MIN_LAYERS = 2;
+    private static final int MACH_RING_MAX_LAYERS = 6;
+    private static final int MACH_RING_MAX_PREDICTION_TICKS = 512;
     private static final ResourceLocation GUI_ICONS_LOCATION =
             ResourceLocation.withDefaultNamespace("textures/gui/icons.png");
     private static final Map<Integer, PlayerAnimation> PLAYER_ANIMATIONS = new HashMap<>();
@@ -41,8 +52,13 @@ public final class ClientKickState {
     public static void updateCharge(
             int entityId, boolean active, float value, float maximum, int chargeLevel) {
         if (active) {
-            CHARGING_PLAYERS.put(entityId,
-                    new ChargeVisual(Math.max(0.0F, value), Math.max(0.0F, maximum), chargeLevel));
+            CHARGING_PLAYERS.compute(entityId, (ignored, visual) -> {
+                if (visual == null) {
+                    return new ChargeVisual(value, maximum, chargeLevel);
+                }
+                visual.update(value, maximum, chargeLevel);
+                return visual;
+            });
         } else {
             CHARGING_PLAYERS.remove(entityId);
         }
@@ -63,13 +79,13 @@ public final class ClientKickState {
     }
 
     public static void updateKickedEntity(
-            int entityId, boolean active, boolean spin, float visualSpeed) {
+            int entityId, boolean active, boolean spin, float visualSpeed, Vec3 initialVelocity) {
         if (!active) {
             KICKED_ENTITIES.remove(entityId);
             return;
         }
         KICKED_ENTITIES.put(entityId,
-                new KickedVisual(spin, gameTime(), Math.max(0.0D, visualSpeed)));
+                new KickedVisual(spin, gameTime(), Math.max(0.0D, visualSpeed), initialVelocity));
     }
 
     public static void tickParticles(Minecraft minecraft) {
@@ -93,11 +109,17 @@ public final class ClientKickState {
         while (kickedIterator.hasNext()) {
             Map.Entry<Integer, KickedVisual> entry = kickedIterator.next();
             Entity entity = level.getEntity(entry.getKey());
-            if (!(entity instanceof LivingEntity living)) {
+            KickedVisual visual = entry.getValue();
+            if (entity instanceof LivingEntity living) {
+                emitFlightParticles(level, living, visual);
+            } else if (visual.machRingsPrepared) {
+                emitDueMachRings(level, visual);
+                if (visual.machSequenceComplete()) {
+                    kickedIterator.remove();
+                }
+            } else {
                 kickedIterator.remove();
-                continue;
             }
-            emitFlightParticles(level, living, entry.getValue());
         }
     }
 
@@ -190,7 +212,10 @@ public final class ClientKickState {
     public static void removeEntity(int entityId) {
         PLAYER_ANIMATIONS.remove(entityId);
         CHARGING_PLAYERS.remove(entityId);
-        KICKED_ENTITIES.remove(entityId);
+        KickedVisual visual = KICKED_ENTITIES.get(entityId);
+        if (visual == null || !visual.hasPendingMachRings()) {
+            KICKED_ENTITIES.remove(entityId);
+        }
     }
 
     private static void emitChargeParticles(ClientLevel level, Player player, ChargeVisual visual) {
@@ -199,64 +224,134 @@ public final class ClientKickState {
         }
         double progress = Mth.clamp(visual.charge / visual.maximum, 0.0F, 1.0F);
         boolean full = progress >= 0.999D;
-        int enchantmentLevel = Math.max(0, visual.level);
-        double outerRadius = 1.65D + enchantmentLevel * 0.42D;
-        double focusRadius = outerRadius * (0.45D + 0.35D * (1.0D - progress));
+        int enchantmentLevel = Mth.clamp(visual.level, 1, 5);
+        long phase = level.getGameTime() + player.getId();
+        double outerRadius = 1.0D + enchantmentLevel * 0.24D
+                + progress * (0.18D + enchantmentLevel * 0.08D);
+        double focusRadius = outerRadius * (0.58D + 0.22D * (1.0D - progress));
         Vec3 center = player.position().add(0.0D, 0.12D, 0.0D);
-        RandomSource random = player.getRandom();
-        int moteCount = 4 + enchantmentLevel * 2;
         ParticleOptions dust = new DustParticleOptions(
-                Vec3.fromRGB24(chargeColor(visual.charge)).toVector3f(), full ? 1.45F : 1.0F);
+                Vec3.fromRGB24(chargeColor(visual.charge)).toVector3f(),
+                0.55F + enchantmentLevel * 0.1F + (float) progress * 0.25F);
 
-        for (int i = 0; i < moteCount; i++) {
-            double angle = random.nextDouble() * Math.PI * 2.0D;
-            double shell = focusRadius * (0.72D + random.nextDouble() * 0.28D);
-            double height = 0.08D + random.nextDouble() * (0.4D + player.getBbHeight() * 0.42D);
-            Vec3 offset = new Vec3(Math.cos(angle) * shell, height, Math.sin(angle) * shell);
-            Vec3 inward = new Vec3(-offset.x, -height * 0.18D, -offset.z).normalize()
-                    .scale(0.025D + progress * 0.055D);
-            Vec3 point = center.add(offset);
-            ParticleOptions particle = switch (i & 3) {
-                case 0 -> ParticleTypes.END_ROD;
-                case 1 -> ParticleTypes.ENCHANT;
-                case 2 -> ParticleTypes.SOUL;
-                default -> dust;
-            };
-            level.addParticle(particle, point.x, point.y, point.z, inward.x, inward.y, inward.z);
+        if (full && visual.completionBurstPending) {
+            visual.completionBurstPending = false;
+            emitChargeCompletionBurst(
+                    level, player, center, outerRadius, enchantmentLevel, dust);
         }
 
-        emitOrbitingSoulFlames(level, player, center, outerRadius, progress);
-        if (((level.getGameTime() + player.getId()) & 1L) == 0L) {
+        int moteInterval = full ? Math.max(6, 11 - enchantmentLevel) : Math.max(1, 6 - enchantmentLevel);
+        if (phase % moteInterval == 0L) {
+            int moteCount = full
+                    ? 1 + enchantmentLevel / 3
+                    : 1 + (enchantmentLevel - 1) / 2
+                            + (int) Math.floor(progress * enchantmentLevel * 0.8D);
+            emitChargeMotes(level, player, center, focusRadius, progress,
+                    enchantmentLevel, moteCount, dust);
+        }
+
+        if (enchantmentLevel >= 3) {
+            int orbitInterval = full
+                    ? Math.max(5, 10 - enchantmentLevel)
+                    : Math.max(1, 5 - enchantmentLevel);
+            if (phase % orbitInterval == 0L) {
+                emitOrbitingSoulFlames(level, player, center, outerRadius, progress,
+                        enchantmentLevel >= 4 ? 2 : 1);
+            }
+        }
+
+        int circleInterval = full
+                ? 15 - enchantmentLevel
+                : Math.max(2, 8 - enchantmentLevel);
+        if (enchantmentLevel >= 2 && phase % circleInterval == 0L) {
             emitMagicCircle(level, player, visual, outerRadius, full, dust);
         }
-        if (full) {
-            for (int i = 0; i < 8 + enchantmentLevel * 2; i++) {
-                double angle = random.nextDouble() * Math.PI * 2.0D;
-                double distance = random.nextDouble() * outerRadius * 0.55D;
-                ParticleOptions particle = i % 3 == 0
-                        ? ParticleTypes.SOUL_FIRE_FLAME
-                        : ParticleTypes.TOTEM_OF_UNDYING;
-                level.addParticle(particle,
-                        center.x + Math.cos(angle) * distance, center.y + random.nextDouble() * 0.25D,
-                        center.z + Math.sin(angle) * distance, 0.0D, 0.12D + random.nextDouble() * 0.12D, 0.0D);
+    }
+
+    private static void emitChargeMotes(
+            ClientLevel level,
+            Player player,
+            Vec3 center,
+            double focusRadius,
+            double progress,
+            int enchantmentLevel,
+            int count,
+            ParticleOptions dust) {
+        RandomSource random = player.getRandom();
+        for (int i = 0; i < count; i++) {
+            double angle = random.nextDouble() * Math.PI * 2.0D;
+            double shell = focusRadius * (0.76D + random.nextDouble() * 0.24D);
+            double height = 0.06D + random.nextDouble()
+                    * (0.18D + player.getBbHeight() * (0.18D + enchantmentLevel * 0.035D));
+            Vec3 offset = new Vec3(Math.cos(angle) * shell, height, Math.sin(angle) * shell);
+            Vec3 inward = new Vec3(-offset.x, -height * 0.15D, -offset.z).normalize()
+                    .scale(0.018D + progress * (0.025D + enchantmentLevel * 0.006D));
+            Vec3 point = center.add(offset);
+            ParticleOptions particle;
+            if (enchantmentLevel == 1) {
+                particle = dust;
+            } else if (enchantmentLevel == 2) {
+                particle = (i & 1) == 0 ? dust : ParticleTypes.END_ROD;
+            } else if (enchantmentLevel == 3) {
+                particle = switch (i % 3) {
+                    case 0 -> ParticleTypes.END_ROD;
+                    case 1 -> ParticleTypes.ENCHANT;
+                    default -> dust;
+                };
+            } else {
+                particle = switch (i & 3) {
+                    case 0 -> ParticleTypes.END_ROD;
+                    case 1 -> ParticleTypes.ENCHANT;
+                    case 2 -> ParticleTypes.SOUL;
+                    default -> dust;
+                };
             }
-            if ((level.getGameTime() + player.getId()) % 6L == 0L) {
-                level.addParticle(ParticleTypes.FLASH, center.x, center.y + 0.2D, center.z,
-                        0.0D, 0.0D, 0.0D);
-            }
+            level.addParticle(particle, point.x, point.y, point.z,
+                    inward.x, inward.y, inward.z);
+        }
+    }
+
+    private static void emitChargeCompletionBurst(
+            ClientLevel level,
+            Player player,
+            Vec3 center,
+            double radius,
+            int enchantmentLevel,
+            ParticleOptions dust) {
+        RandomSource random = player.getRandom();
+        int count = 2 + enchantmentLevel * 2;
+        for (int i = 0; i < count; i++) {
+            double angle = Math.PI * 2.0D * i / count;
+            Vec3 outward = new Vec3(Math.cos(angle), 0.0D, Math.sin(angle));
+            Vec3 point = center.add(outward.scale(radius * 0.42D));
+            ParticleOptions particle = enchantmentLevel >= 4 && i % 3 == 0
+                    ? ParticleTypes.SOUL_FIRE_FLAME
+                    : dust;
+            level.addParticle(particle, point.x, point.y + random.nextDouble() * 0.12D, point.z,
+                    outward.x * 0.035D, 0.025D + random.nextDouble() * 0.025D,
+                    outward.z * 0.035D);
+        }
+        if (enchantmentLevel >= 5) {
+            level.addParticle(ParticleTypes.FLASH, center.x, center.y + 0.1D, center.z,
+                    0.0D, 0.0D, 0.0D);
         }
     }
 
     private static void emitOrbitingSoulFlames(
-            ClientLevel level, Player player, Vec3 center, double radius, double progress) {
+            ClientLevel level,
+            Player player,
+            Vec3 center,
+            double radius,
+            double progress,
+            int count) {
         double rotation = level.getGameTime() * (0.11D + progress * 0.08D) + player.getId() * 0.37D;
-        for (int i = 0; i < 2; i++) {
-            double angle = rotation + Math.PI * i;
+        for (int i = 0; i < count; i++) {
+            double angle = rotation + Math.PI * 2.0D * i / count;
             double height = 0.18D + Math.sin(rotation * 1.7D + i * Math.PI) * 0.09D;
             Vec3 point = center.add(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
             level.addParticle(ParticleTypes.SOUL_FIRE_FLAME,
                     point.x, point.y, point.z, 0.0D, 0.012D, 0.0D);
-            if (((level.getGameTime() + i) & 1L) == 0L) {
+            if (count > 1 && ((level.getGameTime() + i) & 1L) == 0L) {
                 double trailAngle = angle - 0.22D;
                 level.addParticle(ParticleTypes.SOUL,
                         center.x + Math.cos(trailAngle) * radius, point.y + 0.04D,
@@ -273,26 +368,26 @@ public final class ClientKickState {
             boolean full,
             ParticleOptions dust) {
         Vec3 center = player.position().add(0.0D, 0.045D, 0.0D);
-        int rings = full ? 3 : 2;
-        int points = 24 + visual.level * 3;
-        double rotation = level.getGameTime() * (full ? 0.075D : 0.035D);
+        int enchantmentLevel = Mth.clamp(visual.level, 1, 5);
+        int rings = full ? 1 : enchantmentLevel >= 5 ? 3 : enchantmentLevel >= 4 ? 2 : 1;
+        int points = 8 + enchantmentLevel * 4
+                + (int) Math.floor((visual.charge / visual.maximum) * enchantmentLevel * 2.0F);
+        double rotation = level.getGameTime() * (full ? 0.025D : 0.02D + enchantmentLevel * 0.008D);
         for (int ring = 0; ring < rings; ring++) {
-            double ringRadius = outerRadius * (full ? 0.38D + ring * 0.25D : 0.64D + ring * 0.25D);
+            double ringRadius = outerRadius * (full ? 0.52D : 0.56D + ring * 0.2D);
             double ringRotation = ring % 2 == 0 ? rotation : -rotation;
             for (int i = 0; i < points; i++) {
                 double angle = Math.PI * 2.0D * i / points + ringRotation;
                 double x = center.x + Math.cos(angle) * ringRadius;
                 double z = center.z + Math.sin(angle) * ringRadius;
-                level.addParticle(dust, x, center.y, z, 0.0D, full ? 0.012D : 0.002D, 0.0D);
-                if (full && i % 4 == 0) {
-                    level.addParticle(i % 8 == 0 ? ParticleTypes.SOUL_FIRE_FLAME : ParticleTypes.ELECTRIC_SPARK,
-                            x, center.y + 0.02D, z,
-                            0.0D, 0.035D, 0.0D);
-                }
+                level.addParticle(dust, x, center.y, z, 0.0D, full ? 0.002D : 0.0D, 0.0D);
             }
         }
 
-        int sigils = 5 + Math.max(0, visual.level) / 2;
+        if (full || enchantmentLevel < 4) {
+            return;
+        }
+        int sigils = enchantmentLevel == 4 ? 3 : 5;
         for (int sigil = 0; sigil < sigils; sigil++) {
             double angle = Math.PI * 2.0D * sigil / sigils - rotation;
             Vec3 radial = new Vec3(Math.cos(angle), 0.0D, Math.sin(angle));
@@ -302,7 +397,7 @@ public final class ClientKickState {
                 double bend = pointIndex == 1 ? outerRadius * 0.06D : 0.0D;
                 Vec3 point = center.add(radial.scale(distance)).add(tangent.scale(bend));
                 level.addParticle(pointIndex == 1 ? ParticleTypes.ELECTRIC_SPARK : dust,
-                        point.x, point.y, point.z, 0.0D, full ? 0.01D : 0.0D, 0.0D);
+                        point.x, point.y, point.z, 0.0D, 0.0D, 0.0D);
             }
         }
     }
@@ -347,37 +442,71 @@ public final class ClientKickState {
         if ((age & 1) == 0) {
             spawnTrail(level, entity, visual, current, ParticleTypes.CAMPFIRE_COSY_SMOKE, 5, 1.0D);
         }
-        double ringRadius = Math.max(1.05D, entity.getBbWidth() * 0.75D + entity.getBbHeight() * 0.2D);
-        if (previous == null) {
-            Vec3 estimatedStart = current.subtract(movement);
-            boolean emitted = emitMachRingsAlongSegment(level, estimatedStart, current, visual, ringRadius);
-            if (!emitted) {
-                emitMachRing(level, current.subtract(visual.lastDirection.scale(0.8D)),
-                        visual.lastDirection, ringRadius);
+        if (!visual.machRingsPrepared) {
+            prepareMachRings(entity, current, visual);
+        }
+        emitDueMachRings(level, visual);
+    }
+
+    private static void prepareMachRings(
+            LivingEntity entity, Vec3 start, KickedVisual visual) {
+        visual.machRingsPrepared = true;
+        Vec3 velocity = visual.initialVelocity;
+        if (velocity.lengthSqr() <= 1.0E-6D) {
+            return;
+        }
+        int ringCount = KickMath.machRingCount(visual.visualSpeed);
+        int smokeRingCount = (ringCount + 1) / 2;
+        double baseRadius = Math.max(1.05D,
+                entity.getBbWidth() * 0.75D + entity.getBbHeight() * 0.2D)
+                * MACH_RING_RADIUS_MULTIPLIER;
+        boolean submerged = entity.isInWater();
+        Vec3 position = start;
+        double travelled = 0.0D;
+        int ringIndex = 0;
+        for (int tick = 0;
+                ringIndex < ringCount && tick < MACH_RING_MAX_PREDICTION_TICKS;
+                tick++) {
+            double segmentLength = velocity.length();
+            if (segmentLength > 1.0E-6D) {
+                double segmentEnd = travelled + segmentLength;
+                while (ringIndex < ringCount
+                        && MACH_RING_START_DISTANCE + ringIndex * MACH_RING_INTERVAL
+                                <= segmentEnd + 1.0E-6D) {
+                    double targetDistance = MACH_RING_START_DISTANCE
+                            + ringIndex * MACH_RING_INTERVAL;
+                    double progress = Mth.clamp(
+                            (targetDistance - travelled) / segmentLength, 0.0D, 1.0D);
+                    Vec3 direction = velocity.normalize();
+                    Vec3 center = position.add(velocity.scale(progress));
+                    double radius = baseRadius
+                            * KickMath.machRingRadiusScale(ringIndex, visual.visualSpeed);
+                    long arrivalTime = visual.startedAt + Math.max(0L, Math.round(tick + progress));
+                    visual.machRings.add(new MachRing(
+                            center, direction, radius, arrivalTime, ringIndex < smokeRingCount));
+                    ringIndex++;
+                }
+                position = position.add(velocity);
+                travelled = segmentEnd;
             }
-        } else {
-            emitMachRingsAlongSegment(level, previous, current, visual, ringRadius);
+            velocity = KickMath.nextBallisticVelocity(velocity, submerged);
         }
     }
 
-    private static boolean emitMachRingsAlongSegment(
-            ClientLevel level, Vec3 start, Vec3 end, KickedVisual visual, double radius) {
-        Vec3 segment = end.subtract(start);
-        double length = segment.length();
-        if (length < 1.0E-4D) {
-            return false;
+    private static void emitDueMachRings(ClientLevel level, KickedVisual visual) {
+        long now = gameTime();
+        while (visual.nextMachRing < visual.machRings.size()) {
+            MachRing ring = visual.machRings.get(visual.nextMachRing);
+            if (ring.arrivalTime > now) {
+                break;
+            }
+            emitMachRing(level, ring.center, ring.direction, ring.radius,
+                    KickMath.machRingLifetimeTicks(visual.visualSpeed));
+            if (ring.smokeTrail) {
+                emitMachTrail(level, ring.center, ring.direction, ring.radius, visual.visualSpeed);
+            }
+            visual.nextMachRing++;
         }
-        Vec3 direction = segment.normalize();
-        double interval = 1.75D;
-        double distance = interval - visual.ringDistance;
-        boolean emitted = false;
-        while (distance <= length + 1.0E-6D) {
-            emitMachRing(level, start.add(direction.scale(distance)), direction, radius);
-            distance += interval;
-            emitted = true;
-        }
-        visual.ringDistance = (visual.ringDistance + length) % interval;
-        return emitted;
     }
 
     private static void spawnTrail(
@@ -403,26 +532,61 @@ public final class ClientKickState {
         }
     }
 
-    private static void emitMachRing(ClientLevel level, Vec3 center, Vec3 direction, double radius) {
+    private static void emitMachRing(
+            ClientLevel level, Vec3 center, Vec3 direction, double radius, int lifetimeTicks) {
         Vec3 first = direction.cross(new Vec3(0.0D, 1.0D, 0.0D));
         if (first.lengthSqr() < 1.0E-4D) {
             first = direction.cross(new Vec3(1.0D, 0.0D, 0.0D));
         }
         first = first.normalize();
         Vec3 second = direction.cross(first).normalize();
-        ParticleOptions dust = new DustParticleOptions(
-                Vec3.fromRGB24(0xC8F7FF).toVector3f(), 1.35F);
-        for (int i = 0; i < 32; i++) {
-            double angle = Math.PI * 2.0D * i / 32.0D;
+        int points = Mth.clamp((int) Math.ceil(radius * 15.0D),
+                MACH_RING_MIN_POINTS, MACH_RING_MAX_POINTS);
+        int layers = Mth.clamp((int) Math.ceil(radius * 0.55D),
+                MACH_RING_MIN_LAYERS, MACH_RING_MAX_LAYERS);
+        double thickness = radius * 0.18D;
+        for (int i = 0; i < points; i++) {
+            double angleStep = Math.PI * 2.0D / points;
+            double angle = angleStep * i
+                    + (level.random.nextDouble() - 0.5D) * angleStep * 0.55D;
             Vec3 outward = first.scale(Math.cos(angle)).add(second.scale(Math.sin(angle)));
-            Vec3 point = center.add(outward.scale(radius));
-            level.addParticle(ParticleTypes.CLOUD,
-                    point.x, point.y, point.z, outward.x * 0.065D, outward.y * 0.065D, outward.z * 0.065D);
-            if ((i & 1) == 0) {
-                Vec3 inner = center.add(outward.scale(radius * 0.82D));
-                level.addParticle(dust, inner.x, inner.y, inner.z,
-                        outward.x * 0.035D, outward.y * 0.035D, outward.z * 0.035D);
+            for (int layer = 0; layer < layers; layer++) {
+                double layerOffset = layers == 1
+                        ? 0.0D
+                        : thickness * ((double) layer / (layers - 1) - 0.5D);
+                double radialJitter = (level.random.nextDouble() - 0.5D) * thickness * 0.3D;
+                double axialJitter = (level.random.nextDouble() - 0.5D) * thickness * 0.45D;
+                Vec3 point = center.add(outward.scale(radius + layerOffset + radialJitter))
+                        .add(direction.scale(axialJitter));
+                level.addAlwaysVisibleParticle(ModParticleTypes.MACH_RING.get(), true,
+                        point.x, point.y, point.z, lifetimeTicks, 0.0D, 0.0D);
             }
+        }
+    }
+
+    private static void emitMachTrail(
+            ClientLevel level, Vec3 center, Vec3 direction, double ringRadius, double launchSpeed) {
+        Vec3 first = direction.cross(new Vec3(0.0D, 1.0D, 0.0D));
+        if (first.lengthSqr() < 1.0E-4D) {
+            first = direction.cross(new Vec3(1.0D, 0.0D, 0.0D));
+        }
+        first = first.normalize();
+        Vec3 second = direction.cross(first).normalize();
+        double length = KickMath.machTrailLength(launchSpeed);
+        double radius = Math.max(0.35D,
+                ringRadius * KickMath.machTrailThicknessScale(launchSpeed));
+        int lifetimeTicks = KickMath.machTrailLifetimeTicks(launchSpeed);
+        int particles = Mth.clamp((int) Math.ceil(length * (2.2D + radius * 1.8D)), 64, 240);
+        double particleSize = Mth.clamp(radius * 0.65D, 0.4D, 1.4D);
+        for (int i = 0; i < particles; i++) {
+            double along = length * ((i + level.random.nextDouble()) / particles - 0.5D);
+            double radialDistance = Math.sqrt(level.random.nextDouble()) * radius;
+            double angle = level.random.nextDouble() * Mth.TWO_PI;
+            Vec3 radial = first.scale(Math.cos(angle) * radialDistance)
+                    .add(second.scale(Math.sin(angle) * radialDistance));
+            Vec3 point = center.add(direction.scale(along)).add(radial);
+            level.addAlwaysVisibleParticle(ModParticleTypes.MACH_TRAIL.get(), true,
+                    point.x, point.y, point.z, lifetimeTicks, particleSize, 0.0D);
         }
     }
 
@@ -447,21 +611,61 @@ public final class ClientKickState {
     private record PlayerAnimation(byte animation, long startedAt) {
     }
 
-    private record ChargeVisual(float charge, float maximum, int level) {
+    private static final class ChargeVisual {
+        private float charge;
+        private float maximum;
+        private int level;
+        private boolean completionBurstPending;
+
+        private ChargeVisual(float charge, float maximum, int level) {
+            update(charge, maximum, level);
+        }
+
+        private void update(float value, float maximum, int level) {
+            float safeMaximum = Math.max(0.0F, maximum);
+            float safeValue = Math.max(0.0F, value);
+            boolean wasFull = this.maximum > 0.0F
+                    && this.charge >= this.maximum - 1.0E-4F;
+            boolean nowFull = safeMaximum > 0.0F
+                    && safeValue >= safeMaximum - 1.0E-4F;
+            if (!wasFull && nowFull) {
+                this.completionBurstPending = true;
+            }
+            this.charge = safeValue;
+            this.maximum = safeMaximum;
+            this.level = Math.max(0, level);
+        }
     }
 
     private static final class KickedVisual {
         private final boolean spin;
         private final long startedAt;
         private final double visualSpeed;
+        private final Vec3 initialVelocity;
+        private final List<MachRing> machRings = new ArrayList<>();
         private Vec3 lastPosition;
         private Vec3 lastDirection = new Vec3(0.0D, 0.0D, 1.0D);
-        private double ringDistance;
+        private boolean machRingsPrepared;
+        private int nextMachRing;
 
-        private KickedVisual(boolean spin, long startedAt, double visualSpeed) {
+        private KickedVisual(
+                boolean spin, long startedAt, double visualSpeed, Vec3 initialVelocity) {
             this.spin = spin;
             this.startedAt = startedAt;
             this.visualSpeed = visualSpeed;
+            this.initialVelocity = initialVelocity;
         }
+
+        private boolean hasPendingMachRings() {
+            return this.machRingsPrepared && this.nextMachRing < this.machRings.size();
+        }
+
+        private boolean machSequenceComplete() {
+            return this.machRingsPrepared && this.nextMachRing >= this.machRings.size();
+        }
+    }
+
+    private record MachRing(
+            Vec3 center, Vec3 direction, double radius, long arrivalTime, boolean smokeTrail) {
     }
 }

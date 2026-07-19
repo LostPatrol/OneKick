@@ -170,7 +170,8 @@ public final class KickManager {
             Vec3 impact = entityCollision == null
                     ? findBlockImpact(level, entity, flightVelocity)
                     : entityCollision.getBoundingBox().getCenter();
-            BlockImpactService.handleImpact(level, entity, impact, flightVelocity, state.snapshot);
+            BlockImpactService.handleImpact(level, entity, impact, flightVelocity,
+                    state.initialVelocity.length(), state.snapshot);
             KickEnchantments enchantments = state.snapshot.enchantments();
             if (entity.isAlive()
                     && (enchantments.disintegration() > 0 || enchantments.unstableCollision() > 0)) {
@@ -219,7 +220,7 @@ public final class KickManager {
             KickedMotionState kicked = KICKED_ENTITIES.get(living.getUUID());
             if (kicked != null) {
                 KickNetwork.sendKickedState(
-                        observer, living, true, kicked.spin, (float) kicked.visualSpeed);
+                        observer, living, true, kicked.spin, kicked.initialVelocity);
             }
         }
         if (target instanceof ServerPlayer trackedPlayer) {
@@ -329,14 +330,15 @@ public final class KickManager {
         KICKED_ENTITIES.put(target.getUUID(), motionState);
         suppressVoluntaryMovement(target);
         storeControlledMotion(target, velocity);
-        KickNetwork.broadcastKickedState(target, true, spin, (float) velocity.length());
+        KickNetwork.broadcastKickedState(target, true, spin, velocity);
     }
 
     private static void startTraversal(
             LivingEntity entity, KickedMotionState state, Vec3 impactVelocity, double impactSpeed) {
         KickEnchantments enchantments = state.snapshot.enchantments();
         double distance = KickMath.impactTraversalDistance(
-                state.snapshot.kickSpeed(), enchantments.disintegration(),
+                state.snapshot.kickSpeed(), state.initialVelocity.length(),
+                enchantments.disintegration(),
                 enchantments.unstableCollision(), enchantments.kineticOverload());
         if (distance <= 0.0D || impactVelocity.lengthSqr() < 1.0E-6D) {
             stopTracking(entity);
@@ -542,7 +544,7 @@ public final class KickManager {
             if (entity instanceof Mob mob) {
                 mob.setNoAi(removed.originalNoAi);
             }
-            KickNetwork.broadcastKickedState(entity, false, false, 0.0F);
+            KickNetwork.broadcastKickedState(entity, false, false, Vec3.ZERO);
         }
     }
 
@@ -576,7 +578,6 @@ public final class KickManager {
         private final boolean originalNoPhysics;
         private final boolean originalNoAi;
         private final Vec3 initialVelocity;
-        private final double visualSpeed;
         private Vec3 lastPosition;
         private AABB lastBounds;
         private Vec3 lastVelocity;
@@ -604,7 +605,6 @@ public final class KickManager {
             this.originalNoPhysics = originalNoPhysics;
             this.originalNoAi = originalNoAi;
             this.initialVelocity = lastVelocity;
-            this.visualSpeed = lastVelocity.length();
         }
     }
 }

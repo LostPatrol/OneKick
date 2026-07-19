@@ -32,6 +32,7 @@ import net.minecraftforge.event.ForgeEventFactory;
 import net.minecraftforge.event.level.BlockEvent;
 
 public final class BlockImpactService {
+    private static final int MAX_DEBRIS_PER_IMPACT = 64;
     private static final List<ScheduledExplosion> SCHEDULED_EXPLOSIONS = new ArrayList<>();
 
     private BlockImpactService() {
@@ -42,6 +43,7 @@ public final class BlockImpactService {
             LivingEntity impactedEntity,
             Vec3 impact,
             Vec3 movement,
+            double launchSpeed,
             KickSnapshot snapshot) {
         KickEnchantments enchantments = snapshot.enchantments();
         boolean hasDisintegration = enchantments.disintegration() > 0;
@@ -49,17 +51,26 @@ public final class BlockImpactService {
         boolean tripleSynergy = hasDisintegration && hasExplosion && enchantments.kineticOverload() > 0;
 
         if (tripleSynergy) {
-            destroyCylinder(level, impact, movement, snapshot, true);
-            scheduleExplosionChain(level, impactedEntity, impact, movement, snapshot);
+            double levelThreeRadius = Math.max(
+                    KickMath.disintegrationRadius(snapshot.kickSpeed(), true),
+                    KickMath.unstableExplosionRadius(launchSpeed, 3));
+            double destructionRadius = levelThreeRadius * KickMath.unstableCollisionLevelScale(
+                    enchantments.unstableCollision());
+            destroyCylinder(level, impact, movement, snapshot, destructionRadius, false, true);
+            scheduleExplosionChain(level, impactedEntity, impact, movement,
+                    launchSpeed, destructionRadius, snapshot);
             return;
         }
         if (hasExplosion) {
-            float power = KickMath.explosionPower(snapshot.kickSpeed(), enchantments.unstableCollision());
+            float power = (float) KickMath.unstableExplosionRadius(
+                    launchSpeed, enchantments.unstableCollision());
             explode(level, impactedEntity, impact, movement, power, hasDisintegration, snapshot);
             return;
         }
         if (hasDisintegration) {
-            destroyCylinder(level, impact, movement, snapshot, false);
+            destroyCylinder(level, impact, movement, snapshot,
+                    KickMath.disintegrationRadius(snapshot.kickSpeed(), false), true,
+                    enchantments.kineticOverload() > 0);
         }
     }
 
@@ -90,18 +101,21 @@ public final class BlockImpactService {
             LivingEntity impactedEntity,
             Vec3 impact,
             Vec3 movement,
+            double launchSpeed,
+            double explosionRadius,
             KickSnapshot snapshot) {
         Vec3 axis = safeDirection(movement);
         double depth = KickMath.disintegrationDepth(
                 snapshot.kickSpeed(), snapshot.enchantments().kineticOverload());
-        double radius = KickMath.disintegrationRadius(snapshot.kickSpeed(), true);
         int count = Math.max(2, Mth.ceil(depth / 1.75D));
-        float power = (float) Math.max(1.8D, radius / 1.35D);
+        float power = (float) explosionRadius;
         long now = level.getServer().getTickCount();
         for (int i = 0; i < count; i++) {
             double distance = count == 1 ? 0.0D : depth * i / (count - 1.0D);
+            long travelTicks = (long) Math.floor(distance / Math.max(1.0D, launchSpeed));
             SCHEDULED_EXPLOSIONS.add(new ScheduledExplosion(
-                    level.dimension(), now + i * 2L, impact.add(axis.scale(distance)),
+                    level.dimension(), now + travelTicks,
+                    impact.add(axis.scale(distance)),
                     movement, power, impactedEntity.getUUID(), snapshot));
         }
     }
@@ -127,7 +141,7 @@ public final class BlockImpactService {
         visualExplosion.finalizeExplosion(false);
         sendExplosionPacket(level, position, power, visualExplosion);
         if (destroyBlocks) {
-            destroySphere(level, position, movement, power * 1.35D, snapshot);
+            destroySphere(level, position, movement, power, snapshot, false);
         }
     }
 
@@ -144,18 +158,30 @@ public final class BlockImpactService {
     }
 
     private static void destroyCylinder(
-            ServerLevel level, Vec3 impact, Vec3 movement, KickSnapshot snapshot, boolean tripleSynergy) {
+            ServerLevel level,
+            Vec3 impact,
+            Vec3 movement,
+            KickSnapshot snapshot,
+            double radius,
+            boolean animateDebris,
+            boolean irregularBoundary) {
         Vec3 axis = safeDirection(movement);
-        double radius = KickMath.disintegrationRadius(snapshot.kickSpeed(), tripleSynergy);
         double depth = KickMath.disintegrationDepth(
                 snapshot.kickSpeed(), snapshot.enchantments().kineticOverload());
         Vec3 end = impact.add(axis.scale(depth));
-        int minX = Mth.floor(Math.min(impact.x, end.x) - radius);
-        int minY = Mth.floor(Math.min(impact.y, end.y) - radius);
-        int minZ = Mth.floor(Math.min(impact.z, end.z) - radius);
-        int maxX = Mth.floor(Math.max(impact.x, end.x) + radius);
-        int maxY = Mth.floor(Math.max(impact.y, end.y) + radius);
-        int maxZ = Mth.floor(Math.max(impact.z, end.z) + radius);
+        double outerRadius = irregularBoundary
+                ? radius * KickMath.IRREGULAR_DESTRUCTION_MAX_SCALE
+                : radius;
+        double capJitter = irregularBoundary
+                ? Math.min(1.5D,
+                        Math.min(Math.max(0.35D, radius * 0.15D), depth * 0.15D))
+                : 0.0D;
+        int minX = Mth.floor(Math.min(impact.x, end.x) - outerRadius);
+        int minY = Mth.floor(Math.min(impact.y, end.y) - outerRadius);
+        int minZ = Mth.floor(Math.min(impact.z, end.z) - outerRadius);
+        int maxX = Mth.floor(Math.max(impact.x, end.x) + outerRadius);
+        int maxY = Mth.floor(Math.max(impact.y, end.y) + outerRadius);
+        int maxZ = Mth.floor(Math.max(impact.z, end.z) + outerRadius);
         List<BlockCandidate> candidates = new ArrayList<>();
 
         for (int x = minX; x <= maxX; x++) {
@@ -164,11 +190,22 @@ public final class BlockImpactService {
                     BlockPos pos = new BlockPos(x, y, z);
                     Vec3 relative = Vec3.atCenterOf(pos).subtract(impact);
                     double along = relative.dot(axis);
-                    if (along < -0.75D || along > depth + 0.75D) {
+                    double front = irregularBoundary
+                            ? -0.75D + (level.random.nextDouble() * 2.0D - 1.0D) * capJitter
+                            : -0.75D;
+                    double back = irregularBoundary
+                            ? depth + 0.75D
+                                    + (level.random.nextDouble() * 2.0D - 1.0D) * capJitter
+                            : depth + 0.75D;
+                    if (along < front || along > back) {
                         continue;
                     }
                     double perpendicular = relative.subtract(axis.scale(along)).length();
-                    if (perpendicular <= radius) {
+                    double effectiveRadius = irregularBoundary
+                            ? radius * KickMath.irregularDestructionScale(
+                                    level.random.nextDouble())
+                            : radius;
+                    if (perpendicular <= effectiveRadius) {
                         candidates.add(new BlockCandidate(pos, along));
                     }
                 }
@@ -176,22 +213,31 @@ public final class BlockImpactService {
         }
         candidates.sort(Comparator.comparingDouble(BlockCandidate::distance));
         affectBlocks(level, impact, axis, movement.length(), snapshot,
-                candidates.stream().map(BlockCandidate::pos).toList());
+                candidates.stream().map(BlockCandidate::pos).toList(), animateDebris);
     }
 
     private static void destroySphere(
-            ServerLevel level, Vec3 center, Vec3 movement, double radius, KickSnapshot snapshot) {
-        int blockRadius = Mth.ceil(radius);
+            ServerLevel level,
+            Vec3 center,
+            Vec3 movement,
+            double radius,
+            KickSnapshot snapshot,
+            boolean animateDebris) {
+        int blockRadius = Mth.ceil(radius * KickMath.IRREGULAR_DESTRUCTION_MAX_SCALE);
         BlockPos origin = BlockPos.containing(center);
         List<BlockPos> candidates = new ArrayList<>();
         for (BlockPos cursor : BlockPos.betweenClosed(origin.offset(-blockRadius, -blockRadius, -blockRadius),
                 origin.offset(blockRadius, blockRadius, blockRadius))) {
-            if (Vec3.atCenterOf(cursor).distanceToSqr(center) <= radius * radius) {
+            double effectiveRadius = radius * KickMath.irregularDestructionScale(
+                    level.random.nextDouble());
+            if (Vec3.atCenterOf(cursor).distanceToSqr(center)
+                    <= effectiveRadius * effectiveRadius) {
                 candidates.add(cursor.immutable());
             }
         }
         candidates.sort(Comparator.comparingDouble(pos -> Vec3.atCenterOf(pos).distanceToSqr(center)));
-        affectBlocks(level, center, safeDirection(movement), movement.length(), snapshot, candidates);
+        affectBlocks(level, center, safeDirection(movement), movement.length(), snapshot,
+                candidates, animateDebris);
     }
 
     private static void affectBlocks(
@@ -200,7 +246,8 @@ public final class BlockImpactService {
             Vec3 direction,
             double impactSpeed,
             KickSnapshot snapshot,
-            List<BlockPos> candidates) {
+            List<BlockPos> candidates,
+            boolean animateDebris) {
         ServerPlayer attacker = snapshot.attacker(level);
         if (attacker == null) {
             return;
@@ -208,6 +255,7 @@ public final class BlockImpactService {
         boolean silkTouch = snapshot.enchantments().silkTouch();
         double dropChance = silkTouch ? 1.0D : 0.30D;
         int affected = 0;
+        int debrisCount = 0;
         for (BlockPos pos : candidates) {
             if (!canDestroy(level, pos)) {
                 continue;
@@ -219,7 +267,9 @@ public final class BlockImpactService {
             }
 
             boolean shouldDrop = silkTouch || level.random.nextDouble() < dropChance;
-            boolean animate = !state.is(ModTags.DISINTEGRATION_DIRECT)
+            boolean animate = animateDebris
+                    && debrisCount < MAX_DEBRIS_PER_IMPACT
+                    && !state.is(ModTags.DISINTEGRATION_DIRECT)
                     && !state.hasBlockEntity()
                     && state.getDestroySpeed(level, pos) <= 4.0F
                     && level.random.nextFloat() < 0.65F;
@@ -246,6 +296,7 @@ public final class BlockImpactService {
                 Vec3 velocity = flightDirection.normalize().scale(strength);
                 ImpactDebrisEntity.launch(level, pos, state, velocity, attacker,
                         silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop);
+                debrisCount++;
             } else {
                 removeBlock(level, pos, state, attacker,
                         silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop);

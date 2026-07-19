@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkDirection;
@@ -21,7 +22,7 @@ public final class KickNetwork {
     public static final byte ANIMATION_CHARGE = 0;
     public static final byte ANIMATION_KICK = 1;
     public static final byte ANIMATION_STOP = 2;
-    private static final String PROTOCOL = "2";
+    private static final String PROTOCOL = "3";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(OneKick.MOD_ID, "main"),
             () -> PROTOCOL,
@@ -88,15 +89,19 @@ public final class KickNetwork {
     }
 
     public static void broadcastKickedState(
-            LivingEntity entity, boolean active, boolean spin, float visualSpeed) {
+            LivingEntity entity, boolean active, boolean spin, Vec3 initialVelocity) {
         CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> entity),
-                new KickedEntityPacket(entity.getId(), active, spin, visualSpeed));
+                KickedEntityPacket.create(entity.getId(), active, spin, initialVelocity));
     }
 
     public static void sendKickedState(
-            ServerPlayer receiver, LivingEntity entity, boolean active, boolean spin, float visualSpeed) {
+            ServerPlayer receiver,
+            LivingEntity entity,
+            boolean active,
+            boolean spin,
+            Vec3 initialVelocity) {
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> receiver),
-                new KickedEntityPacket(entity.getId(), active, spin, visualSpeed));
+                KickedEntityPacket.create(entity.getId(), active, spin, initialVelocity));
     }
 
     private static void handleInput(KickInputPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -123,7 +128,8 @@ public final class KickNetwork {
             KickedEntityPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
                 ClientKickState.updateKickedEntity(
-                        packet.entityId(), packet.active(), packet.spin(), packet.visualSpeed()));
+                        packet.entityId(), packet.active(), packet.spin(), packet.visualSpeed(),
+                        new Vec3(packet.initialX(), packet.initialY(), packet.initialZ())));
     }
 
     private record KickInputPacket(boolean pressed) {
@@ -163,17 +169,35 @@ public final class KickNetwork {
         }
     }
 
-    private record KickedEntityPacket(int entityId, boolean active, boolean spin, float visualSpeed) {
+    private record KickedEntityPacket(
+            int entityId,
+            boolean active,
+            boolean spin,
+            float visualSpeed,
+            double initialX,
+            double initialY,
+            double initialZ) {
+        private static KickedEntityPacket create(
+                int entityId, boolean active, boolean spin, Vec3 initialVelocity) {
+            return new KickedEntityPacket(
+                    entityId, active, spin, (float) initialVelocity.length(),
+                    initialVelocity.x, initialVelocity.y, initialVelocity.z);
+        }
+
         private static void encode(KickedEntityPacket packet, FriendlyByteBuf buffer) {
             buffer.writeVarInt(packet.entityId);
             buffer.writeBoolean(packet.active);
             buffer.writeBoolean(packet.spin);
             buffer.writeFloat(packet.visualSpeed);
+            buffer.writeDouble(packet.initialX);
+            buffer.writeDouble(packet.initialY);
+            buffer.writeDouble(packet.initialZ);
         }
 
         private static KickedEntityPacket decode(FriendlyByteBuf buffer) {
             return new KickedEntityPacket(
-                    buffer.readVarInt(), buffer.readBoolean(), buffer.readBoolean(), buffer.readFloat());
+                    buffer.readVarInt(), buffer.readBoolean(), buffer.readBoolean(), buffer.readFloat(),
+                    buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
         }
     }
 }

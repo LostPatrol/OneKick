@@ -12,8 +12,11 @@ public final class KickMath {
     public static final double BASE_SPEED = 1.0D;
     public static final double MOVEMENT_SPEED_COEFFICIENT = 1.8D;
     public static final double KICK_REACH = 3.5D;
-    public static final int COOLDOWN_TICKS = 12;
+    public static final int COOLDOWN_TICKS = 4;
     public static final float CHARGE_SPEED_MULTIPLIER = 6.0F;
+    public static final double MACH_RING_MIN_SPEED = 4.5D;
+    public static final double IRREGULAR_DESTRUCTION_MIN_SCALE = 0.82D;
+    public static final double IRREGULAR_DESTRUCTION_MAX_SCALE = 1.18D;
     private static final double CHARGE_QUADRATIC_COEFFICIENT = 1.0D / 15.0D;
     private static final double BALLISTIC_GRAVITY = 0.06D;
     private static final double SUBMERGED_DRAG = 0.82D;
@@ -129,9 +132,22 @@ public final class KickMath {
         return Math.max(1.0D, depth * (1.0D + overloadLevel * 0.65D));
     }
 
-    public static float explosionPower(double kickSpeed, int unstableLevel) {
-        return (float) Math.max(1.0D,
-                0.9D + unstableLevel * 0.7D + Math.sqrt(Math.max(0.0D, kickSpeed)) * 0.75D);
+    public static double unstableExplosionRadius(double launchSpeed, int unstableLevel) {
+        double levelThreeRadius = 3.3D + nonNegative(launchSpeed) * 0.455D;
+        return levelThreeRadius * unstableCollisionLevelScale(unstableLevel);
+    }
+
+    public static double unstableCollisionLevelScale(int unstableLevel) {
+        return Math.max(0, unstableLevel) / 3.0D;
+    }
+
+    public static double irregularDestructionScale(double randomSample) {
+        double sample = Double.isNaN(randomSample)
+                ? 0.5D
+                : Math.max(0.0D, Math.min(1.0D, randomSample));
+        return IRREGULAR_DESTRUCTION_MIN_SCALE
+                + sample * (IRREGULAR_DESTRUCTION_MAX_SCALE
+                        - IRREGULAR_DESTRUCTION_MIN_SCALE);
     }
 
     public static boolean isAlignedImpact(Vec3 initialVelocity, Vec3 impactVelocity) {
@@ -142,11 +158,15 @@ public final class KickMath {
     }
 
     public static double impactTraversalDistance(
-            double kickSpeed, int disintegrationLevel, int unstableLevel, int overloadLevel) {
+            double kickSpeed,
+            double launchSpeed,
+            int disintegrationLevel,
+            int unstableLevel,
+            int overloadLevel) {
         if (disintegrationLevel > 0 && (unstableLevel <= 0 || overloadLevel > 0)) {
             return disintegrationDepth(kickSpeed, overloadLevel);
         }
-        return unstableLevel > 0 ? Math.max(2.0D, explosionPower(kickSpeed, unstableLevel) * 1.35D) : 0.0D;
+        return unstableLevel > 0 ? unstableExplosionRadius(launchSpeed, unstableLevel) : 0.0D;
     }
 
     public static float traversalDamage(double impactSpeed, int overloadLevel) {
@@ -165,10 +185,59 @@ public final class KickMath {
         if (speed < 2.25D) {
             return 2;
         }
-        if (speed < 3.25D) {
+        if (speed < MACH_RING_MIN_SPEED) {
             return 3;
         }
         return 4;
+    }
+
+    public static double machRingRadiusScale(int emittedRings, double launchSpeed) {
+        double growthScale = switch (Math.max(0, emittedRings)) {
+            case 0 -> 0.55D;
+            case 1 -> 0.78D;
+            default -> 1.0D;
+        };
+        return growthScale * machRingMaximumRadiusScale(launchSpeed);
+    }
+
+    public static double machRingMaximumRadiusScale(double launchSpeed) {
+        return 1.0D
+                + Math.log1p(Math.max(0.0D,
+                        nonNegative(launchSpeed) - MACH_RING_MIN_SPEED)) * 0.85D;
+    }
+
+    public static int machRingCount(double launchSpeed) {
+        double excessSpeed = Math.max(0.0D,
+                nonNegative(launchSpeed) - MACH_RING_MIN_SPEED);
+        int extraRings = (int) Math.min(21.0D,
+                Math.floor(Math.log1p(excessSpeed) * 4.0D));
+        return 3 + extraRings;
+    }
+
+    public static int machRingLifetimeTicks(double launchSpeed) {
+        double excessSpeed = Math.max(0.0D,
+                nonNegative(launchSpeed) - MACH_RING_MIN_SPEED);
+        return (int) Math.min(200.0D,
+                Math.round(60.0D + Math.log1p(excessSpeed) * 28.0D));
+    }
+
+    public static double machTrailLength(double launchSpeed) {
+        double excessSpeed = Math.max(0.0D,
+                nonNegative(launchSpeed) - MACH_RING_MIN_SPEED);
+        return Math.min(34.0D, 21.375D + Math.log1p(excessSpeed) * 2.8D);
+    }
+
+    public static double machTrailThicknessScale(double launchSpeed) {
+        double excessSpeed = Math.max(0.0D,
+                nonNegative(launchSpeed) - MACH_RING_MIN_SPEED);
+        return Math.min(0.42D, 0.24D + Math.log1p(excessSpeed) * 0.045D);
+    }
+
+    public static int machTrailLifetimeTicks(double launchSpeed) {
+        double excessSpeed = Math.max(0.0D,
+                nonNegative(launchSpeed) - MACH_RING_MIN_SPEED);
+        return (int) Math.min(160.0D,
+                Math.round(45.0D + Math.log1p(excessSpeed) * 22.0D));
     }
 
     private static double nonNegative(double value) {
