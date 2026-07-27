@@ -5,6 +5,7 @@ import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.UUID;
 import net.lostpatrol.onekick.OneKick;
+import net.lostpatrol.onekick.config.OneKickConfig;
 import net.lostpatrol.onekick.world.BlockImpactService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
@@ -16,7 +17,9 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.gametest.GameTestHolder;
@@ -144,6 +147,82 @@ public final class KickGameTests {
         });
     }
 
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void largeUnstableCollisionKeepsEntityDamageAndKnockback(GameTestHelper helper) {
+        ServerPlayer attacker = registerSnapshotAttacker(helper);
+        Villager impactedEntity = helper.spawn(EntityType.VILLAGER, 6, 3, 2);
+        impactedEntity.setInvulnerable(true);
+        var bystander = helper.spawn(EntityType.IRON_GOLEM, 8, 3, 2);
+        float startingHealth = bystander.getHealth();
+
+        KickEnchantments enchantments = new KickEnchantments(
+                0, 0, 0, 3, 0, 0, 0, 0, false);
+        KickSnapshot snapshot = new KickSnapshot(
+                attacker.getUUID(), 6.0D, enchantments, ItemStack.EMPTY);
+        Vec3 impact = helper.absoluteVec(new Vec3(5.5D, 3.0D, 2.5D));
+        BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
+                new Vec3(6.0D, 0.0D, 0.0D), 6.0D, snapshot);
+
+        unregisterSnapshotAttacker(helper, attacker);
+        helper.assertTrue(bystander.getHealth() < startingHealth,
+                "Large unstable collision did not retain explosion damage");
+        helper.assertTrue(bystander.getDeltaMovement().x > 0.0D,
+                "Large unstable collision did not retain explosion knockback");
+        helper.succeed();
+    }
+
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void kineticOverloadDropProtectionFollowsServerCommand(
+            GameTestHelper helper) {
+        ServerPlayer attacker = registerSnapshotAttacker(helper);
+        boolean originalSetting = OneKickConfig.suppressKineticOverloadBlockDrops();
+        var commandSource = helper.getLevel().getServer().createCommandSourceStack()
+                .withPermission(4)
+                .withSuppressedOutput();
+        ItemStack boots = new ItemStack(Items.IRON_BOOTS);
+        boots.enchant(Enchantments.SILK_TOUCH, 1);
+        KickEnchantments enchantments = new KickEnchantments(
+                0, 0, 1, 0, 1, 0, 0, 0, true);
+        KickSnapshot snapshot = new KickSnapshot(
+                attacker.getUUID(), 6.0D, enchantments, boots);
+        Villager impactedEntity = helper.spawn(EntityType.VILLAGER, 2, 3, 2);
+        Vec3 impact = helper.absoluteVec(new Vec3(5.5D, 3.0D, 2.5D));
+
+        try {
+            int enableResult = helper.getLevel().getServer().getCommands().performPrefixedCommand(
+                    commandSource, "onekick kinetic_overload_drop_protection true");
+            helper.assertTrue(enableResult == 1, "Could not enable Kinetic Overload drop protection");
+            fillKineticOverloadDropProtectionVolume(helper);
+            BlockPos chestPosition = helper.absolutePos(new BlockPos(7, 3, 2));
+            helper.setBlock(7, 3, 2, Blocks.CHEST);
+            if (helper.getLevel().getBlockEntity(chestPosition) instanceof ChestBlockEntity chest) {
+                chest.setItem(0, new ItemStack(Items.DIAMOND, 16));
+            } else {
+                helper.fail("Extreme drop protection test chest has no block entity");
+                return;
+            }
+            BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
+                    new Vec3(1.0D, 0.0D, 0.0D), 1.0D, snapshot);
+            helper.assertTrue(countGlassDrops(helper, impact) == 0,
+                    "Enabled Kinetic Overload drop protection created block drops");
+            helper.assertTrue(countDiamondDrops(helper, impact) > 0,
+                    "Kinetic Overload drop protection suppressed container contents");
+
+            int disableResult = helper.getLevel().getServer().getCommands().performPrefixedCommand(
+                    commandSource, "onekick kinetic_overload_drop_protection false");
+            helper.assertTrue(disableResult == 1, "Could not disable Kinetic Overload drop protection");
+            fillKineticOverloadDropProtectionVolume(helper);
+            BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
+                    new Vec3(1.0D, 0.0D, 0.0D), 1.0D, snapshot);
+            helper.assertTrue(countGlassDrops(helper, impact) > 0,
+                    "Disabled Kinetic Overload drop protection did not restore block drops");
+            helper.succeed();
+        } finally {
+            OneKickConfig.setSuppressKineticOverloadBlockDrops(originalSetting);
+            unregisterSnapshotAttacker(helper, attacker);
+        }
+    }
+
     @GameTest(template = "flight_room", batch = "combinedDrops", timeoutTicks = 20)
     public static void disintegrationAndUnstableCollisionCreateBlockDrops(GameTestHelper helper) {
         ServerPlayer attacker = registerSnapshotAttacker(helper);
@@ -172,7 +251,8 @@ public final class KickGameTests {
     }
 
     @GameTest(template = "flight_room", batch = "tripleDrops", timeoutTicks = 20)
-    public static void combinedDisintegrationDropsSurviveExplosionEffects(GameTestHelper helper) {
+    public static void combinedDisintegrationSuppressesDropsAndPreservesExistingItems(
+            GameTestHelper helper) {
         ServerPlayer attacker = registerSnapshotAttacker(helper);
         attacker.setInvulnerable(true);
         Villager impactedEntity = helper.spawn(EntityType.VILLAGER, 6, 3, 2);
@@ -193,8 +273,8 @@ public final class KickGameTests {
             unregisterSnapshotAttacker(helper, attacker);
             helper.assertTrue(existingDrop.isAlive(),
                     "Triple enchantment explosions destroyed an existing item entity");
-            helper.assertTrue(drops > 0,
-                    "Disintegration + unstable collision + kinetic overload destroyed every block drop");
+            helper.assertTrue(drops == 0,
+                    "Kinetic Overload drop protection allowed triple-enchantment block drops");
             helper.succeed();
         });
     }
@@ -204,6 +284,22 @@ public final class KickGameTests {
                 ItemEntity.class, AABB.ofSize(impact, 30.0D, 20.0D, 20.0D)).stream()
                 .filter(ItemEntity::isAlive)
                 .filter(entity -> entity.getItem().is(Items.COBBLESTONE))
+                .count();
+    }
+
+    private static long countGlassDrops(GameTestHelper helper, Vec3 impact) {
+        return helper.getLevel().getEntitiesOfClass(
+                ItemEntity.class, AABB.ofSize(impact, 30.0D, 20.0D, 20.0D)).stream()
+                .filter(ItemEntity::isAlive)
+                .filter(entity -> entity.getItem().is(Items.GLASS))
+                .count();
+    }
+
+    private static long countDiamondDrops(GameTestHelper helper, Vec3 impact) {
+        return helper.getLevel().getEntitiesOfClass(
+                ItemEntity.class, AABB.ofSize(impact, 30.0D, 20.0D, 20.0D)).stream()
+                .filter(ItemEntity::isAlive)
+                .filter(entity -> entity.getItem().is(Items.DIAMOND))
                 .count();
     }
 
@@ -236,6 +332,16 @@ public final class KickGameTests {
             for (int y = 1; y <= 6; y++) {
                 for (int z = 1; z <= 3; z++) {
                     helper.setBlock(x, y, z, Blocks.STONE);
+                }
+            }
+        }
+    }
+
+    private static void fillKineticOverloadDropProtectionVolume(GameTestHelper helper) {
+        for (int x = 4; x <= 10; x++) {
+            for (int y = 1; y <= 6; y++) {
+                for (int z = 1; z <= 3; z++) {
+                    helper.setBlock(x, y, z, Blocks.GLASS);
                 }
             }
         }

@@ -10,5 +10,9 @@
   "entity.onekick.impact_debris": "Impact Debris",
   "key.onekick.kick": "Kick / Charge Kick",
   "key.categories.onekick": "One Kick",
-  "message.onekick.cooldown": "Your kick is still cooling down"
+  "message.onekick.cooldown": "Your kick is still cooling down",
+  "commands.onekick.kinetic_overload_drop_protection.status": "Kinetic Overload block-drop protection is %s.",
+  "commands.onekick.kinetic_overload_drop_protection.updated": "Kinetic Overload block-drop protection set to %s.",
+  "commands.onekick.kinetic_overload_drop_protection.enabled": "enabled",
+  "commands.onekick.kinetic_overload_drop_protection.disabled": "disabled"
 }

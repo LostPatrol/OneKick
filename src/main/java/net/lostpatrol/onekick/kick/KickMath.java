@@ -155,6 +155,11 @@ public final class KickMath {
         return Math.max(0, unstableLevel) / 3.0D;
     }
 
+    public static boolean shouldSuppressKineticOverloadBlockDrops(
+            boolean protectionEnabled, int overloadLevel) {
+        return protectionEnabled && overloadLevel > 0;
+    }
+
     public static double irregularDestructionScale(double randomSample) {
         double sample = Double.isNaN(randomSample)
                 ? 0.5D

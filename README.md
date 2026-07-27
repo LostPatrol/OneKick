@@ -13,7 +13,7 @@ Boot enchantments expand the move:
 - **Disintegration** and **Unstable Collision** break terrain or create explosions when a launched creature collides.
 - **Kinetic Overload** greatly raises speed and damage.
 - **Conservation of Angular Momentum** makes creatures kicked upward spin until they land.
-- Vanilla **Silk Touch** can be enchanted onto boots and preserves drops from kick-driven block destruction.
+- Vanilla **Silk Touch** can be enchanted onto boots and preserves drops from kick-driven block destruction, unless the server's Kinetic Overload drop protection is active.
 
 ## Requirements
 
@@ -26,6 +26,19 @@ Boot enchantments expand the move:
 The core gameplay is available in development builds. There is currently no published release.
 
 Charge stops at its enchantment-defined maximum, while **Overcharge I–II** multiplies that maximum by 2–3. Releasing a fully charged Charge V kick with Overcharge II costs about 35 food energy by itself. Charging consumes food energy separately, so even full saturation and hunger may not be enough to reach the maximum naturally. Launched creatures follow a server-controlled ballistic arc: stronger kicks keep the curve flatter and travel farther. The kick itself deals no damage; kinetic damage starts only when the creature later collides, while Disintegration and Unstable Collision can add damage during their forced traversal. If movement veers too far from the initial direction, both the trail and follow-up impact effects stop. Disintegration limits flying block debris to 64 entities per impact, but the current tuning build still leaves kick and terrain-destruction upper bounds uncapped, so back up test worlds before experimenting with extreme values.
+
+## Server drop protection
+
+Kinetic Overload block-drop protection is enabled by default. When enabled, any kick-driven terrain destruction from boots with **Kinetic Overload** suppresses block-item drops and debris landing drops, regardless of impact speed. Container contents still drop normally.
+
+Operators with permission level 2 can query or change it without restarting:
+
+```text
+/onekick kinetic_overload_drop_protection
+/onekick kinetic_overload_drop_protection true|false
+```
+
+The setting is persisted in the world's `serverconfig/onekick-server.toml` as `performance.suppressKineticOverloadBlockDrops`.
 
 ## License
 

@@ -10,5 +10,9 @@
   "entity.onekick.impact_debris": "冲击碎块",
   "key.onekick.kick": "踢击 / 蓄力踢击",
   "key.categories.onekick": "One Kick",
-  "message.onekick.cooldown": "踢击仍在冷却中"
+  "message.onekick.cooldown": "踢击仍在冷却中",
+  "commands.onekick.kinetic_overload_drop_protection.status": "动能过载方块掉落保护当前为：%s。",
+  "commands.onekick.kinetic_overload_drop_protection.updated": "已将动能过载方块掉落保护设为：%s。",
+  "commands.onekick.kinetic_overload_drop_protection.enabled": "启用",
+  "commands.onekick.kinetic_overload_drop_protection.disabled": "禁用"
 }

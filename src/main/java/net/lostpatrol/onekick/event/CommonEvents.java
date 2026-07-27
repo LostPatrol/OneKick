@@ -1,16 +1,18 @@
 package net.lostpatrol.onekick.event;
 
 import net.lostpatrol.onekick.OneKick;
+import net.lostpatrol.onekick.command.OneKickCommands;
 import net.lostpatrol.onekick.kick.KickManager;
 import net.lostpatrol.onekick.world.BlockImpactService;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingEvent;
-import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.level.ExplosionEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -43,6 +45,11 @@ public final class CommonEvents {
         if (event.phase == TickEvent.Phase.END) {
             BlockImpactService.tick(event.getServer());
         }
+    }
+
+    @SubscribeEvent
+    public static void onRegisterCommands(RegisterCommandsEvent event) {
+        OneKickCommands.register(event.getDispatcher());
     }
 
     @SubscribeEvent

@@ -276,6 +276,14 @@ class KickMathTest {
                 > KickMath.unstableExplosionRadius(10.0D, 1));
     }
 
+    @Test
+    void kineticOverloadDropProtectionUsesOnlyEnableAndEnchantmentGates() {
+        assertTrue(!KickMath.shouldSuppressKineticOverloadBlockDrops(false, 3));
+        assertTrue(!KickMath.shouldSuppressKineticOverloadBlockDrops(true, 0));
+        assertTrue(KickMath.shouldSuppressKineticOverloadBlockDrops(true, 1));
+        assertTrue(KickMath.shouldSuppressKineticOverloadBlockDrops(true, 3));
+    }
+
     private static double simulatedBallisticRange(Vec3 initialVelocity) {
         Vec3 position = Vec3.ZERO;
         Vec3 velocity = initialVelocity;

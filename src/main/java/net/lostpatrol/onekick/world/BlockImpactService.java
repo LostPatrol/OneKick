@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import javax.annotation.Nullable;
+import net.lostpatrol.onekick.config.OneKickConfig;
 import net.lostpatrol.onekick.kick.KickEnchantments;
 import net.lostpatrol.onekick.kick.KickMath;
 import net.lostpatrol.onekick.kick.KickSnapshot;
@@ -25,12 +26,17 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.item.PrimedTnt;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.ProtectionEnchantment;
 import net.minecraft.world.level.Explosion;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.gameevent.GameEvent;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.ForgeEventFactory;
@@ -38,6 +44,9 @@ import net.minecraftforge.event.level.BlockEvent;
 
 public final class BlockImpactService {
     private static final int MAX_DEBRIS_PER_IMPACT = 64;
+    private static final int VANILLA_EXPLOSION_RAY_COUNT = 16 * 16 * 16 - 14 * 14 * 14;
+    private static final float BLOCK_RAY_FREE_MIN_POWER = 4.0F;
+    private static final long LOW_ALLOCATION_CAPSULE_SCAN_THRESHOLD = 4096L;
     private static final List<ScheduledExplosion> SCHEDULED_EXPLOSIONS = new ArrayList<>();
     private static final Set<Explosion> DROP_SAFE_EXPLOSIONS =
             Collections.newSetFromMap(new IdentityHashMap<>());
@@ -161,7 +170,12 @@ public final class BlockImpactService {
         }
         DROP_SAFE_EXPLOSIONS.add(visualExplosion);
         try {
-            visualExplosion.explode();
+            if (power >= BLOCK_RAY_FREE_MIN_POWER) {
+                explodeEntitiesWithoutBlockRays(
+                        level, excludedEntity, position, power, visualExplosion);
+            } else {
+                visualExplosion.explode();
+            }
         } finally {
             DROP_SAFE_EXPLOSIONS.remove(visualExplosion);
         }
@@ -169,6 +183,71 @@ public final class BlockImpactService {
         sendExplosionPacket(level, position, power, visualExplosion);
         if (destroyBlocks) {
             destroySphere(level, position, movement, power, snapshot, false);
+        }
+    }
+
+    private static void explodeEntitiesWithoutBlockRays(
+            ServerLevel level,
+            @Nullable Entity excludedEntity,
+            Vec3 position,
+            float power,
+            Explosion explosion) {
+        level.gameEvent(excludedEntity, GameEvent.EXPLODE, position);
+        for (int i = 0; i < VANILLA_EXPLOSION_RAY_COUNT; i++) {
+            level.random.nextFloat();
+        }
+
+        float diameter = power * 2.0F;
+        int minX = Mth.floor(position.x - diameter - 1.0D);
+        int maxX = Mth.floor(position.x + diameter + 1.0D);
+        int minY = Mth.floor(position.y - diameter - 1.0D);
+        int maxY = Mth.floor(position.y + diameter + 1.0D);
+        int minZ = Mth.floor(position.z - diameter - 1.0D);
+        int maxZ = Mth.floor(position.z + diameter + 1.0D);
+        List<Entity> entities = level.getEntities(excludedEntity,
+                new AABB(minX, minY, minZ, maxX, maxY, maxZ));
+        ForgeEventFactory.onExplosionDetonate(level, explosion, entities, diameter);
+
+        for (Entity entity : entities) {
+            if (entity.ignoreExplosion()) {
+                continue;
+            }
+            double distanceRatio = Math.sqrt(entity.distanceToSqr(position)) / diameter;
+            if (distanceRatio > 1.0D) {
+                continue;
+            }
+            double directionX = entity.getX() - position.x;
+            double directionY = (entity instanceof PrimedTnt ? entity.getY() : entity.getEyeY())
+                    - position.y;
+            double directionZ = entity.getZ() - position.z;
+            double directionLength = Math.sqrt(
+                    directionX * directionX
+                            + directionY * directionY
+                            + directionZ * directionZ);
+            if (directionLength == 0.0D) {
+                continue;
+            }
+            directionX /= directionLength;
+            directionY /= directionLength;
+            directionZ /= directionLength;
+            double exposure = Explosion.getSeenPercent(position, entity);
+            double impact = (1.0D - distanceRatio) * exposure;
+            entity.hurt(explosion.getDamageSource(),
+                    (float) ((int) ((impact * impact + impact) / 2.0D
+                            * 7.0D * diameter + 1.0D)));
+            double knockback = entity instanceof LivingEntity living
+                    ? ProtectionEnchantment.getExplosionKnockbackAfterDampener(living, impact)
+                    : impact;
+            Vec3 knockbackVector = new Vec3(
+                    directionX * knockback,
+                    directionY * knockback,
+                    directionZ * knockback);
+            entity.setDeltaMovement(entity.getDeltaMovement().add(knockbackVector));
+            if (entity instanceof Player player
+                    && !player.isSpectator()
+                    && (!player.isCreative() || !player.getAbilities().flying)) {
+                explosion.getHitPlayers().put(player, knockbackVector);
+            }
         }
     }
 
@@ -203,8 +282,33 @@ public final class BlockImpactService {
         int maxX = Mth.floor(Math.max(impact.x, end.x) + outerRadius);
         int maxY = Mth.floor(Math.max(impact.y, end.y) + outerRadius);
         int maxZ = Mth.floor(Math.max(impact.z, end.z) + outerRadius);
-        List<BlockCandidate> candidates = new ArrayList<>();
+        List<BlockCandidate> candidates = isLargeCapsuleScan(
+                minX, minY, minZ, maxX, maxY, maxZ)
+                ? collectCapsuleCandidatesLowAllocation(
+                        level, impact, axis, depth, radius,
+                        minX, minY, minZ, maxX, maxY, maxZ)
+                : collectCapsuleCandidates(
+                        level, impact, axis, depth, radius,
+                        minX, minY, minZ, maxX, maxY, maxZ);
+        candidates.sort(Comparator.comparingDouble(BlockCandidate::distance));
+        return affectBlocks(level, impact, axis, movement.length(), snapshot,
+                candidates.stream().map(BlockCandidate::pos).toList(),
+                animateDebris, collectAffectedPositions);
+    }
 
+    private static List<BlockCandidate> collectCapsuleCandidates(
+            ServerLevel level,
+            Vec3 impact,
+            Vec3 axis,
+            double depth,
+            double radius,
+            int minX,
+            int minY,
+            int minZ,
+            int maxX,
+            int maxY,
+            int maxZ) {
+        List<BlockCandidate> candidates = new ArrayList<>();
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
@@ -221,10 +325,75 @@ public final class BlockImpactService {
                 }
             }
         }
-        candidates.sort(Comparator.comparingDouble(BlockCandidate::distance));
-        return affectBlocks(level, impact, axis, movement.length(), snapshot,
-                candidates.stream().map(BlockCandidate::pos).toList(),
-                animateDebris, collectAffectedPositions);
+        return candidates;
+    }
+
+    private static List<BlockCandidate> collectCapsuleCandidatesLowAllocation(
+            ServerLevel level,
+            Vec3 impact,
+            Vec3 axis,
+            double depth,
+            double radius,
+            int minX,
+            int minY,
+            int minZ,
+            int maxX,
+            int maxY,
+            int maxZ) {
+        List<BlockCandidate> candidates = new ArrayList<>();
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    double relativeX = x + 0.5D - impact.x;
+                    double relativeY = y + 0.5D - impact.y;
+                    double relativeZ = z + 0.5D - impact.z;
+                    double along = relativeX * axis.x
+                            + relativeY * axis.y
+                            + relativeZ * axis.z;
+                    double perpendicular = perpendicularDistance(
+                            relativeX, relativeY, relativeZ, axis, along);
+                    double effectiveRadius = radius * KickMath.irregularDestructionScale(
+                            level.random.nextDouble());
+                    if (KickMath.destructionCapsuleDistanceSquared(
+                            along, perpendicular, depth) <= effectiveRadius * effectiveRadius) {
+                        candidates.add(new BlockCandidate(new BlockPos(x, y, z), along));
+                    }
+                }
+            }
+        }
+        return candidates;
+    }
+
+    private static boolean isLargeCapsuleScan(
+            int minX,
+            int minY,
+            int minZ,
+            int maxX,
+            int maxY,
+            int maxZ) {
+        long sizeX = (long) maxX - minX + 1L;
+        long sizeY = (long) maxY - minY + 1L;
+        long sizeZ = (long) maxZ - minZ + 1L;
+        if (sizeX > LOW_ALLOCATION_CAPSULE_SCAN_THRESHOLD
+                || sizeY > LOW_ALLOCATION_CAPSULE_SCAN_THRESHOLD / sizeX) {
+            return true;
+        }
+        return sizeZ > LOW_ALLOCATION_CAPSULE_SCAN_THRESHOLD / (sizeX * sizeY);
+    }
+
+    static double perpendicularDistance(
+            double relativeX,
+            double relativeY,
+            double relativeZ,
+            Vec3 axis,
+            double along) {
+        double perpendicularX = relativeX - axis.x * along;
+        double perpendicularY = relativeY - axis.y * along;
+        double perpendicularZ = relativeZ - axis.z * along;
+        return Math.sqrt(
+                perpendicularX * perpendicularX
+                        + perpendicularY * perpendicularY
+                        + perpendicularZ * perpendicularZ);
     }
 
     private static void destroySphere(
@@ -266,22 +435,29 @@ public final class BlockImpactService {
         }
         boolean silkTouch = snapshot.enchantments().silkTouch();
         double dropChance = silkTouch ? 1.0D : 0.30D;
+        boolean suppressDrops = KickMath.shouldSuppressKineticOverloadBlockDrops(
+                OneKickConfig.suppressKineticOverloadBlockDrops(),
+                snapshot.enchantments().kineticOverload());
         int affected = 0;
         int debrisCount = 0;
         List<BlockPos> affectedPositions = collectAffectedPositions
                 ? new ArrayList<>()
                 : List.of();
         for (BlockPos pos : candidates) {
-            if (!canDestroy(level, pos)) {
+            if (level.isOutsideBuildHeight(pos) || !level.hasChunkAt(pos)) {
                 continue;
             }
             BlockState state = level.getBlockState(pos);
+            if (!canDestroy(level, pos, state)) {
+                continue;
+            }
             BlockEvent.BreakEvent breakEvent = new BlockEvent.BreakEvent(level, pos, state, attacker);
             if (MinecraftForge.EVENT_BUS.post(breakEvent)) {
                 continue;
             }
 
-            boolean shouldDrop = silkTouch || level.random.nextDouble() < dropChance;
+            boolean eligibleDrop = silkTouch || level.random.nextDouble() < dropChance;
+            boolean shouldDrop = !suppressDrops && eligibleDrop;
             boolean animate = animateDebris
                     && debrisCount < MAX_DEBRIS_PER_IMPACT
                     && !state.is(ModTags.DISINTEGRATION_DIRECT)
@@ -328,11 +504,7 @@ public final class BlockImpactService {
                 collectAffectedPositions ? List.copyOf(affectedPositions) : List.of());
     }
 
-    private static boolean canDestroy(ServerLevel level, BlockPos pos) {
-        if (level.isOutsideBuildHeight(pos) || !level.hasChunkAt(pos)) {
-            return false;
-        }
-        BlockState state = level.getBlockState(pos);
+    private static boolean canDestroy(ServerLevel level, BlockPos pos, BlockState state) {
         return !state.isAir()
                 && !state.is(ModTags.DISINTEGRATION_IMMUNE)
                 && state.getDestroySpeed(level, pos) >= 0.0F;
