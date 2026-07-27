@@ -1,5 +1,6 @@
 package net.lostpatrol.onekick.client;
 
+import net.lostpatrol.onekick.kick.KickMath;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.Particle;
 import net.minecraft.client.particle.ParticleProvider;
@@ -24,10 +25,10 @@ public final class MachRingParticle extends TextureSheetParticle {
         super(level, x, y, z);
         this.sprites = sprites;
         this.lifetime = Math.max(20, Math.min(200, lifetime));
-        this.fadeTicks = Math.max(10, Math.min(24, this.lifetime / 6));
+        this.fadeTicks = Math.max(30, Math.min(90, Math.round(this.lifetime * 0.45F)));
         this.smokeHalfCycleTicks = 22 + this.random.nextInt(13);
         this.smokeAnimationOffset = this.random.nextInt(this.smokeHalfCycleTicks * 2);
-        this.quadSize = 0.54F + this.random.nextFloat() * 0.20F;
+        this.quadSize = 0.35F + this.random.nextFloat() * 0.13F;
         this.baseAlpha = 0.42F + this.random.nextFloat() * 0.14F;
         this.hasPhysics = false;
         this.friction = 0.99F;
@@ -49,12 +50,8 @@ public final class MachRingParticle extends TextureSheetParticle {
         this.updateSmokeSprite();
         this.oRoll = this.roll;
         this.roll += this.rotationSpeed;
-        if (this.age > this.lifetime - this.fadeTicks) {
-            this.alpha = this.baseAlpha * Math.max(0.0F,
-                    (float) (this.lifetime - this.age) / this.fadeTicks);
-        } else {
-            this.alpha = this.baseAlpha;
-        }
+        this.alpha = this.baseAlpha * KickMath.smoothFadeScale(
+                this.lifetime - this.age, this.fadeTicks);
     }
 
     @Override

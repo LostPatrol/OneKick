@@ -42,11 +42,18 @@ class KickMathTest {
     }
 
     @Test
-    void levelFiveChargeHasSpecifiedFullThresholdFoodCostAndFasterRate() {
+    void chargingAndChargedKickUseSeparateOverchargeFoodCurves() {
         assertEquals(6.0F, KickMath.maxCharge(5, 0), 1.0E-6F);
         assertEquals(12.0F, KickMath.maxCharge(5, 1), 1.0E-6F);
         assertEquals(18.0F, KickMath.maxCharge(5, 2), 1.0E-6F);
         assertEquals(15.0F, KickMath.chargeFoodCost(KickMath.maxCharge(5, 0)), 1.0E-6F);
+        assertEquals(30.0F, KickMath.chargeFoodCost(KickMath.maxCharge(5, 1)), 1.0E-6F);
+        assertEquals(45.0F, KickMath.chargeFoodCost(KickMath.maxCharge(5, 2)), 1.0E-6F);
+        assertEquals(15.0F, KickMath.chargedKickFoodCost(KickMath.maxCharge(5, 0)), 1.0E-6F);
+        assertEquals(25.0F, KickMath.chargedKickFoodCost(KickMath.maxCharge(5, 1)), 1.0E-6F);
+        assertEquals(35.0F, KickMath.chargedKickFoodCost(KickMath.maxCharge(5, 2)), 1.0E-6F);
+        assertTrue(KickMath.chargedKickFoodCost(7.0F) - KickMath.chargedKickFoodCost(6.0F)
+                < KickMath.chargedKickFoodCost(6.0F) - KickMath.chargedKickFoodCost(5.0F));
         assertEquals(0.2625F, KickMath.chargePerTick(5), 1.0E-6F);
     }
 
@@ -71,6 +78,19 @@ class KickMathTest {
                 KickMath.irregularDestructionScale(-10.0D), 1.0E-9D);
         assertEquals(KickMath.IRREGULAR_DESTRUCTION_MAX_SCALE,
                 KickMath.irregularDestructionScale(10.0D), 1.0E-9D);
+    }
+
+    @Test
+    void destructionCapsuleRoundsBothCylinderEnds() {
+        double depth = 8.0D;
+        assertEquals(9.0D,
+                KickMath.destructionCapsuleDistanceSquared(4.0D, 3.0D, depth), 1.0E-9D);
+        assertEquals(25.0D,
+                KickMath.destructionCapsuleDistanceSquared(-3.0D, 4.0D, depth), 1.0E-9D);
+        assertEquals(25.0D,
+                KickMath.destructionCapsuleDistanceSquared(11.0D, 4.0D, depth), 1.0E-9D);
+        assertTrue(KickMath.destructionCapsuleDistanceSquared(-3.0D, 4.1D, depth) > 25.0D);
+        assertTrue(KickMath.destructionCapsuleDistanceSquared(11.0D, 4.1D, depth) > 25.0D);
     }
 
     @Test
@@ -159,6 +179,18 @@ class KickMathTest {
     }
 
     @Test
+    void machRingIntervalKeepsItsBaseAndGrowsByAtMostHalf() {
+        assertEquals(21.375D,
+                KickMath.machRingInterval(KickMath.MACH_RING_MIN_SPEED), 1.0E-9D);
+        assertTrue(KickMath.machRingInterval(7.0D)
+                > KickMath.machRingInterval(5.0D));
+        assertTrue(KickMath.machRingInterval(20.0D)
+                > KickMath.machRingInterval(7.0D));
+        assertEquals(21.375D * 1.5D,
+                KickMath.machRingInterval(Double.MAX_VALUE), 1.0E-9D);
+    }
+
+    @Test
     void machRingLifetimeStartsLongAndGrowsWithLaunchSpeed() {
         assertEquals(60, KickMath.machRingLifetimeTicks(KickMath.MACH_RING_MIN_SPEED));
         assertTrue(KickMath.machRingLifetimeTicks(7.0D)
@@ -169,19 +201,49 @@ class KickMathTest {
     }
 
     @Test
-    void machTrailDimensionsAndLifetimeGrowWithLaunchSpeedAndStayBounded() {
+    void machTrailDissipatesTwentyPercentSlowerThanMachRings() {
         double threshold = KickMath.MACH_RING_MIN_SPEED;
-        assertEquals(21.375D, KickMath.machTrailLength(threshold), 1.0E-9D);
-        assertEquals(0.24D, KickMath.machTrailThicknessScale(threshold), 1.0E-9D);
-        assertEquals(45, KickMath.machTrailLifetimeTicks(threshold));
-        assertTrue(KickMath.machTrailLength(20.0D) > KickMath.machTrailLength(6.0D));
-        assertTrue(KickMath.machTrailThicknessScale(20.0D)
-                > KickMath.machTrailThicknessScale(6.0D));
-        assertTrue(KickMath.machTrailLifetimeTicks(20.0D)
-                > KickMath.machTrailLifetimeTicks(6.0D));
-        assertEquals(34.0D, KickMath.machTrailLength(Double.MAX_VALUE), 1.0E-9D);
-        assertEquals(0.42D, KickMath.machTrailThicknessScale(Double.MAX_VALUE), 1.0E-9D);
-        assertEquals(160, KickMath.machTrailLifetimeTicks(Double.MAX_VALUE));
+        assertEquals(75, KickMath.machTrailLifetimeTicks(threshold));
+        assertEquals((int) Math.ceil(KickMath.machRingLifetimeTicks(20.0D) / 0.8D),
+                KickMath.machTrailLifetimeTicks(20.0D));
+        assertEquals(250, KickMath.machTrailLifetimeTicks(Double.MAX_VALUE));
+    }
+
+    @Test
+    void particleFadeUsesSmoothEndpointsAndMidpoint() {
+        assertEquals(1.0F, KickMath.smoothFadeScale(20, 20));
+        assertEquals(0.5F, KickMath.smoothFadeScale(10, 20));
+        assertEquals(0.0F, KickMath.smoothFadeScale(0, 20));
+    }
+
+    @Test
+    void disintegrationSmokeScalesWithDestroyedBlocksAndImpactSpeed() {
+        assertEquals(0, KickMath.disintegrationSmokeParticleCount(0, 6.0D));
+        assertEquals(0, KickMath.disintegrationSmokeParticleCount(100, 0.0D));
+        assertEquals(7, KickMath.disintegrationSmokeParticleCount(1, 1.0D));
+        assertEquals(27, KickMath.disintegrationSmokeParticleCount(1, 2.0D));
+        assertEquals(60, KickMath.disintegrationSmokeParticleCount(1, 3.0D));
+        assertEquals(240, KickMath.disintegrationSmokeParticleCount(1, 6.0D));
+        assertTrue(KickMath.disintegrationSmokeParticleCount(100, 1.0D)
+                < KickMath.disintegrationSmokeParticleCount(100, 3.0D));
+        assertTrue(KickMath.disintegrationSmokeParticleCount(100, 3.0D)
+                < KickMath.disintegrationSmokeParticleCount(100, 6.0D));
+        assertTrue(KickMath.disintegrationSmokeParticleCount(1000, 3.0D)
+                > KickMath.disintegrationSmokeParticleCount(100, 3.0D));
+        assertEquals(3072,
+                KickMath.disintegrationSmokeParticleCount(Integer.MAX_VALUE, Double.MAX_VALUE));
+        assertEquals(0.24D, KickMath.impactDebrisInitialSpeed(0.0D, 0.5D), 1.0E-9D);
+        assertEquals(1.34D, KickMath.impactDebrisInitialSpeed(10.0D, 0.0D), 1.0E-9D);
+        assertEquals(1.69D, KickMath.impactDebrisInitialSpeed(10.0D, 1.0D), 1.0E-9D);
+        assertEquals(0.084D,
+                KickMath.disintegrationSmokeInitialSpeed(0.0D, 0.5D), 1.0E-9D);
+        assertEquals(0.469D,
+                KickMath.disintegrationSmokeInitialSpeed(10.0D, 0.0D), 1.0E-9D);
+        assertEquals(0.5915D,
+                KickMath.disintegrationSmokeInitialSpeed(10.0D, 1.0D), 1.0E-9D);
+        assertTrue(KickMath.shouldEmitDisintegrationSmoke(1, 0));
+        assertTrue(!KickMath.shouldEmitDisintegrationSmoke(1, 1));
+        assertTrue(!KickMath.shouldEmitDisintegrationSmoke(0, 0));
     }
 
     @Test

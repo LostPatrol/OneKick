@@ -19,6 +19,7 @@ import net.minecraftforge.client.event.EntityRenderersEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.RegisterParticleProvidersEvent;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
+import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.client.event.RenderLivingEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.client.settings.KeyConflictContext;
@@ -39,6 +40,7 @@ public final class ClientEvents {
     );
     private static final Set<Integer> SPIN_POSES = new HashSet<>();
     private static boolean keyWasDown;
+    private static boolean firstPersonLegRendered;
 
     private ClientEvents() {
     }
@@ -62,10 +64,13 @@ public final class ClientEvents {
         public static void registerParticleProviders(RegisterParticleProvidersEvent event) {
             event.registerSpriteSet(ModParticleTypes.MACH_RING.get(), MachRingParticle.Provider::new);
             event.registerSpriteSet(ModParticleTypes.MACH_TRAIL.get(), MachTrailParticle.Provider::new);
+            event.registerSpriteSet(ModParticleTypes.DISINTEGRATION_SMOKE.get(),
+                    DisintegrationSmokeParticle.Provider::new);
         }
 
         @SubscribeEvent
         public static void replacePlayerModels(EntityRenderersEvent.AddLayers event) {
+            FirstPersonKickRenderer.initialize();
             for (String skin : event.getSkins()) {
                 if (event.getPlayerSkin(skin) instanceof PlayerRenderer renderer) {
                     boolean slim = "slim".equals(skin);
@@ -96,6 +101,23 @@ public final class ClientEvents {
             }
             keyWasDown = keyDown;
             ClientKickState.tickParticles(minecraft);
+        }
+
+        @SubscribeEvent
+        public static void renderTick(TickEvent.RenderTickEvent event) {
+            if (event.phase == TickEvent.Phase.START) {
+                firstPersonLegRendered = false;
+            }
+        }
+
+        @SubscribeEvent
+        public static void renderHand(RenderHandEvent event) {
+            if (!firstPersonLegRendered && FirstPersonKickRenderer.render(event)) {
+                firstPersonLegRendered = true;
+            }
+            if (firstPersonLegRendered && FirstPersonKickRenderer.isRightHand(event)) {
+                event.setCanceled(true);
+            }
         }
 
         @SubscribeEvent(priority = EventPriority.HIGHEST)
@@ -136,6 +158,7 @@ public final class ClientEvents {
         @SubscribeEvent
         public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
             keyWasDown = false;
+            firstPersonLegRendered = false;
             SPIN_POSES.clear();
             ClientKickState.clear();
         }

@@ -1,5 +1,6 @@
 package net.lostpatrol.onekick.client;
 
+import net.lostpatrol.onekick.kick.KickMath;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.Particle;
 import net.minecraft.client.particle.ParticleProvider;
@@ -17,34 +18,28 @@ public final class MachTrailParticle extends TextureSheetParticle {
     private final int animationOffset;
     private final float baseAlpha;
     private final float rotationSpeed;
+    private final float sizePulseOffset;
 
     private MachTrailParticle(
-            ClientLevel level,
-            double x,
-            double y,
-            double z,
-            int lifetime,
-            float size,
-            SpriteSet sprites) {
+            ClientLevel level, double x, double y, double z, int lifetime, SpriteSet sprites) {
         super(level, x, y, z);
         this.sprites = sprites;
-        this.lifetime = Mth.clamp(lifetime, 30, 160);
-        this.fadeTicks = Math.max(12, this.lifetime / 4);
-        this.animationHalfCycleTicks = 18 + this.random.nextInt(13);
+        this.lifetime = Mth.clamp(lifetime, 40, 300);
+        this.fadeTicks = Math.max(32, Math.round(this.lifetime * 0.5F));
+        this.animationHalfCycleTicks = 20 + this.random.nextInt(13);
         this.animationOffset = this.random.nextInt(this.animationHalfCycleTicks * 2);
-        this.quadSize = Mth.clamp(size, 0.35F, 1.4F)
-                * (0.82F + this.random.nextFloat() * 0.36F);
-        this.baseAlpha = 0.46F + this.random.nextFloat() * 0.18F;
+        this.quadSize = 0.24F + this.random.nextFloat() * 0.09F;
+        this.baseAlpha = 0.54F + this.random.nextFloat() * 0.18F;
         this.hasPhysics = false;
-        this.friction = 0.985F;
-        this.xd = (this.random.nextDouble() - 0.5D) * 0.006D;
-        this.yd = 0.001D + this.random.nextDouble() * 0.0025D;
-        this.zd = (this.random.nextDouble() - 0.5D) * 0.006D;
+        this.friction = 0.99F;
+        this.xd = (this.random.nextDouble() - 0.5D) * 0.003D;
+        this.yd = 0.0005D + this.random.nextDouble() * 0.0015D;
+        this.zd = (this.random.nextDouble() - 0.5D) * 0.003D;
         this.roll = this.random.nextFloat() * Mth.TWO_PI;
         this.oRoll = this.roll;
-        this.rotationSpeed = (this.random.nextFloat() - 0.5F) * 0.01F;
-        float shade = 0.10F + this.random.nextFloat() * 0.16F;
-        this.setColor(shade * 0.92F, shade * 0.95F, shade);
+        this.rotationSpeed = (this.random.nextFloat() - 0.5F) * 0.009F;
+        this.sizePulseOffset = this.random.nextFloat() * Mth.TWO_PI;
+        this.setColor(1.0F, 1.0F, 1.0F);
         this.setAlpha(this.baseAlpha);
         this.updateSprite();
     }
@@ -55,17 +50,17 @@ public final class MachTrailParticle extends TextureSheetParticle {
         this.updateSprite();
         this.oRoll = this.roll;
         this.roll += this.rotationSpeed;
-        if (this.age > this.lifetime - this.fadeTicks) {
-            this.alpha = this.baseAlpha * Math.max(0.0F,
-                    (float) (this.lifetime - this.age) / this.fadeTicks);
-        }
+        this.alpha = this.baseAlpha * KickMath.smoothFadeScale(
+                this.lifetime - this.age, this.fadeTicks);
     }
 
     @Override
     public float getQuadSize(float partialTick) {
         float growth = Mth.clamp(
                 ((float) this.age + partialTick) / GROWTH_TICKS, 0.0F, 1.0F);
-        return this.quadSize * (0.72F + growth * 0.32F);
+        float pulse = 0.97F + Mth.sin(
+                ((float) this.age + partialTick) * 0.12F + this.sizePulseOffset) * 0.03F;
+        return this.quadSize * (0.72F + growth * 0.34F) * pulse;
     }
 
     private void updateSprite() {
@@ -75,6 +70,11 @@ public final class MachTrailParticle extends TextureSheetParticle {
                 ? phase
                 : cycleTicks - phase;
         this.setSprite(this.sprites.get(animationAge, this.animationHalfCycleTicks));
+    }
+
+    @Override
+    protected int getLightColor(float partialTick) {
+        return 0xF000F0;
     }
 
     @Override
@@ -97,10 +97,10 @@ public final class MachTrailParticle extends TextureSheetParticle {
                 double y,
                 double z,
                 double lifetimeTicks,
-                double size,
+                double ignoredYSpeed,
                 double ignoredZSpeed) {
             return new MachTrailParticle(
-                    level, x, y, z, (int) Math.round(lifetimeTicks), (float) size, this.sprites);
+                    level, x, y, z, (int) Math.round(lifetimeTicks), this.sprites);
         }
     }
 }

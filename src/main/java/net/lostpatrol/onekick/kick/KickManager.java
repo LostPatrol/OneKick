@@ -10,6 +10,7 @@ import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModTags;
 import net.lostpatrol.onekick.world.BlockImpactService;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -32,8 +33,11 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 public final class KickManager {
+    private static final double BLOCK_SWEEP_EPSILON = 1.0E-6D;
+    private static final double MIN_VERTICAL_BLOCK_IMPACT_SPEED = 0.35D;
     private static final Map<UUID, PlayerKickState> PLAYER_STATES = new HashMap<>();
     private static final Map<UUID, KickedMotionState> KICKED_ENTITIES = new HashMap<>();
 
@@ -146,29 +150,48 @@ public final class KickManager {
         }
 
         suppressVoluntaryMovement(entity);
-        entity.move(MoverType.SELF, flightVelocity);
+        double beforeSpeed = flightVelocity.length();
+        int overloadLevel = state.snapshot.enchantments().kineticOverload();
+        FirstBlockImpact firstBlockImpact = findFirstBlockImpact(level, entity, flightVelocity);
+        double firstImpactRemainingSpeed = firstBlockImpact == null
+                ? beforeSpeed
+                : firstBlockImpact.remainingSpeed(flightVelocity);
+        boolean stopAtFirstBlock = firstBlockImpact != null
+                && KickMath.collisionDamage(
+                        beforeSpeed, firstImpactRemainingSpeed, overloadLevel) > 0.0F;
+        Vec3 requestedMovement = stopAtFirstBlock
+                ? flightVelocity.scale(firstBlockImpact.safeMovementFraction(flightVelocity))
+                : flightVelocity;
+        entity.move(MoverType.SELF, requestedMovement);
         Vec3 currentPosition = entity.position();
         AABB currentBounds = entity.getBoundingBox();
         Vec3 actualMovement = currentPosition.subtract(startPosition);
         Entity entityCollision = state.age > 2
                 ? findEntityCollision(level, entity, state, currentPosition, currentBounds)
                 : null;
-        boolean movementClipped = actualMovement.subtract(flightVelocity).lengthSqr() > 1.0E-6D;
-        boolean blockCollision = state.age > 1
+        boolean movementClipped =
+                actualMovement.subtract(requestedMovement).lengthSqr() > 1.0E-6D;
+        boolean blockCollision = stopAtFirstBlock
+                || state.age > 1
                 && movementClipped
                 && (entity.horizontalCollision
-                || entity.verticalCollision && Math.abs(flightVelocity.y) > 0.35D);
+                || entity.verticalCollision
+                && Math.abs(flightVelocity.y) > MIN_VERTICAL_BLOCK_IMPACT_SPEED);
 
         if (blockCollision || entityCollision != null) {
-            double beforeSpeed = flightVelocity.length();
-            double afterSpeed = entityCollision == null ? actualMovement.length() : 0.0D;
-            float damage = KickMath.collisionDamage(beforeSpeed, afterSpeed,
-                    state.snapshot.enchantments().kineticOverload());
+            double afterSpeed = entityCollision != null
+                    ? 0.0D
+                    : firstBlockImpact == null
+                    ? actualMovement.length()
+                    : firstImpactRemainingSpeed;
+            float damage = KickMath.collisionDamage(beforeSpeed, afterSpeed, overloadLevel);
             if (damage > 0.0F) {
                 entity.hurt(level.damageSources().flyIntoWall(), damage);
             }
             Vec3 impact = entityCollision == null
-                    ? findBlockImpact(level, entity, flightVelocity)
+                    ? firstBlockImpact == null
+                    ? findCurrentBlockImpact(level, entity, flightVelocity, actualMovement)
+                    : firstBlockImpact.location()
                     : entityCollision.getBoundingBox().getCenter();
             BlockImpactService.handleImpact(level, entity, impact, flightVelocity,
                     state.initialVelocity.length(), state.snapshot);
@@ -241,13 +264,11 @@ public final class KickManager {
     private static void releaseCharge(ServerPlayer player, PlayerKickState state) {
         float effectiveCharge = state.charge;
         if (!player.getAbilities().instabuild && effectiveCharge > 0.0F) {
-            int desiredCost = Mth.ceil(KickMath.chargeFoodCost(effectiveCharge));
-            int available = player.getFoodData().getFoodLevel();
-            int paid = Math.min(desiredCost, available);
+            int desiredCost = Mth.ceil(KickMath.chargedKickFoodCost(effectiveCharge));
+            int paid = consumeChargeFood(player.getFoodData(), desiredCost);
             if (desiredCost > 0) {
                 effectiveCharge *= (float) paid / desiredCost;
             }
-            setFoodLevel(player.getFoodData(), available - paid);
         }
         state.charging = false;
         state.charge = 0.0F;
@@ -482,30 +503,211 @@ public final class KickManager {
         return null;
     }
 
-    private static Vec3 findBlockImpact(ServerLevel level, LivingEntity entity, Vec3 movement) {
-        Vec3 direction = movement.lengthSqr() < 1.0E-6D ? Vec3.ZERO : movement.normalize();
-        Vec3 start = entity.position();
-        Vec3 end = start.add(direction.scale(entity.getBbWidth() * 0.75D + 0.5D));
-        BlockHitResult hit = level.clip(new ClipContext(start, end,
+    @Nullable
+    static FirstBlockImpact findFirstBlockImpact(
+            ServerLevel level, LivingEntity entity, Vec3 movement) {
+        if (movement.lengthSqr() < 1.0E-6D) {
+            return null;
+        }
+        AABB bounds = entity.getBoundingBox();
+        Vec3 startCenter = bounds.getCenter();
+        AABB sweptBounds = bounds.expandTowards(movement).inflate(BLOCK_SWEEP_EPSILON);
+        double halfX = bounds.getXsize() * 0.5D;
+        double halfY = bounds.getYsize() * 0.5D;
+        double halfZ = bounds.getZsize() * 0.5D;
+        FirstBlockImpact closestImpact = null;
+        double closestContactDistance = Double.MAX_VALUE;
+
+        for (VoxelShape collisionShape : level.getBlockCollisions(entity, sweptBounds)) {
+            for (AABB obstacle : collisionShape.toAabbs()) {
+                AABB expandedObstacle = obstacle.inflate(halfX, halfY, halfZ);
+                SweptBoxHit sweptHit = sweepPointAgainstBox(
+                        startCenter, movement, expandedObstacle);
+                if (sweptHit == null
+                        || sweptHit.face().getAxis() == Direction.Axis.Y
+                        && Math.abs(movement.y) <= MIN_VERTICAL_BLOCK_IMPACT_SPEED) {
+                    continue;
+                }
+                Vec3 centerAtImpact = startCenter.add(
+                        movement.scale(sweptHit.movementFraction()));
+                Vec3 contact = new Vec3(
+                        Mth.clamp(centerAtImpact.x, obstacle.minX, obstacle.maxX),
+                        Mth.clamp(centerAtImpact.y, obstacle.minY, obstacle.maxY),
+                        Mth.clamp(centerAtImpact.z, obstacle.minZ, obstacle.maxZ));
+                double contactDistance = centerAtImpact.distanceToSqr(contact);
+                if (closestImpact == null
+                        || sweptHit.movementFraction()
+                        < closestImpact.movementFraction() - BLOCK_SWEEP_EPSILON
+                        || Math.abs(sweptHit.movementFraction()
+                        - closestImpact.movementFraction()) <= BLOCK_SWEEP_EPSILON
+                        && contactDistance < closestContactDistance) {
+                    closestImpact = new FirstBlockImpact(
+                            contact, sweptHit.face(), sweptHit.movementFraction());
+                    closestContactDistance = contactDistance;
+                }
+            }
+        }
+        return closestImpact;
+    }
+
+    @Nullable
+    private static SweptBoxHit sweepPointAgainstBox(
+            Vec3 start, Vec3 movement, AABB target) {
+        double entryTime = 0.0D;
+        double exitTime = 1.0D;
+        double entryNormalSpeed = 0.0D;
+        Direction entryFace = null;
+        for (Direction.Axis axis : Direction.Axis.values()) {
+            double origin = axisValue(start, axis);
+            double delta = axisValue(movement, axis);
+            double minimum = axisMinimum(target, axis);
+            double maximum = axisMaximum(target, axis);
+            if (Math.abs(delta) < BLOCK_SWEEP_EPSILON) {
+                if (origin <= minimum || origin >= maximum) {
+                    return null;
+                }
+                continue;
+            }
+
+            double nearTime;
+            double farTime;
+            Direction nearFace;
+            if (delta > 0.0D) {
+                nearTime = (minimum - origin) / delta;
+                farTime = (maximum - origin) / delta;
+                nearFace = negativeFace(axis);
+            } else {
+                nearTime = (maximum - origin) / delta;
+                farTime = (minimum - origin) / delta;
+                nearFace = positiveFace(axis);
+            }
+            if (nearTime > entryTime + BLOCK_SWEEP_EPSILON
+                    || Math.abs(nearTime - entryTime) <= BLOCK_SWEEP_EPSILON
+                    && Math.abs(delta) > entryNormalSpeed) {
+                entryTime = nearTime;
+                entryNormalSpeed = Math.abs(delta);
+                entryFace = nearFace;
+            }
+            exitTime = Math.min(exitTime, farTime);
+            if (entryTime > exitTime + BLOCK_SWEEP_EPSILON) {
+                return null;
+            }
+        }
+        if (entryFace == null
+                || entryTime < -BLOCK_SWEEP_EPSILON
+                || entryTime > 1.0D + BLOCK_SWEEP_EPSILON) {
+            return null;
+        }
+        return new SweptBoxHit(entryFace, Mth.clamp(entryTime, 0.0D, 1.0D));
+    }
+
+    private static double axisValue(Vec3 vector, Direction.Axis axis) {
+        return switch (axis) {
+            case X -> vector.x;
+            case Y -> vector.y;
+            case Z -> vector.z;
+        };
+    }
+
+    private static double axisMinimum(AABB box, Direction.Axis axis) {
+        return switch (axis) {
+            case X -> box.minX;
+            case Y -> box.minY;
+            case Z -> box.minZ;
+        };
+    }
+
+    private static double axisMaximum(AABB box, Direction.Axis axis) {
+        return switch (axis) {
+            case X -> box.maxX;
+            case Y -> box.maxY;
+            case Z -> box.maxZ;
+        };
+    }
+
+    private static Direction negativeFace(Direction.Axis axis) {
+        return switch (axis) {
+            case X -> Direction.WEST;
+            case Y -> Direction.DOWN;
+            case Z -> Direction.NORTH;
+        };
+    }
+
+    private static Direction positiveFace(Direction.Axis axis) {
+        return switch (axis) {
+            case X -> Direction.EAST;
+            case Y -> Direction.UP;
+            case Z -> Direction.SOUTH;
+        };
+    }
+
+    private static Vec3 findCurrentBlockImpact(
+            ServerLevel level, LivingEntity entity, Vec3 movement, Vec3 actualMovement) {
+        AABB bounds = entity.getBoundingBox();
+        Vec3 center = bounds.getCenter();
+        Vec3 blockedMovement = movement.subtract(actualMovement);
+        if (entity.horizontalCollision) {
+            blockedMovement = new Vec3(blockedMovement.x, 0.0D, blockedMovement.z);
+        } else if (entity.verticalCollision) {
+            blockedMovement = new Vec3(0.0D, blockedMovement.y, 0.0D);
+        }
+        Vec3 collisionDirection = blockedMovement.lengthSqr() < 1.0E-6D
+                ? movement.normalize()
+                : blockedMovement.normalize();
+        Vec3 closestContact = null;
+        double closestDistance = Double.MAX_VALUE;
+        for (VoxelShape collisionShape : level.getBlockCollisions(
+                entity, bounds.inflate(BLOCK_SWEEP_EPSILON))) {
+            Optional<Vec3> contact = collisionShape.closestPointTo(center);
+            if (contact.isEmpty()) {
+                continue;
+            }
+            Vec3 offset = contact.get().subtract(center);
+            double distance = offset.lengthSqr();
+            if (offset.dot(collisionDirection) > 0.0D && distance < closestDistance) {
+                closestContact = contact.get();
+                closestDistance = distance;
+            }
+        }
+        if (closestContact != null) {
+            return closestContact;
+        }
+
+        double leadingDistance = Math.abs(collisionDirection.x) * bounds.getXsize() * 0.5D
+                + Math.abs(collisionDirection.y) * bounds.getYsize() * 0.5D
+                + Math.abs(collisionDirection.z) * bounds.getZsize() * 0.5D;
+        Vec3 end = center.add(collisionDirection.scale(leadingDistance + 0.5D));
+        BlockHitResult hit = level.clip(new ClipContext(center, end,
                 ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, entity));
-        return hit.getType() == HitResult.Type.MISS ? end : hit.getLocation();
+        return hit.getType() == HitResult.Type.MISS
+                ? center.add(collisionDirection.scale(leadingDistance))
+                : hit.getLocation();
     }
 
     private static boolean canGrowCharge(ServerPlayer player) {
-        return player.getAbilities().instabuild || player.getFoodData().getFoodLevel() > 0;
+        return player.getAbilities().instabuild || availableChargeFood(player.getFoodData()) > 0;
     }
 
     private static void consumeChargeFood(ServerPlayer player, PlayerKickState state) {
         FoodData food = player.getFoodData();
-        while (state.chargeFoodDebt >= 1.0F && food.getFoodLevel() > 0) {
-            setFoodLevel(food, food.getFoodLevel() - 1);
+        while (state.chargeFoodDebt >= 1.0F && consumeChargeFood(food, 1) > 0) {
             state.chargeFoodDebt -= 1.0F;
         }
     }
 
-    private static void setFoodLevel(FoodData food, int value) {
-        food.setFoodLevel(Math.max(0, value));
-        food.setSaturation(Math.min(food.getSaturationLevel(), food.getFoodLevel()));
+    static int availableChargeFood(FoodData food) {
+        return Mth.ceil(food.getSaturationLevel()) + food.getFoodLevel();
+    }
+
+    static int consumeChargeFood(FoodData food, int requested) {
+        int paid = 0;
+        while (paid < requested && food.getSaturationLevel() > 0.0F) {
+            food.setSaturation(Math.max(0.0F, food.getSaturationLevel() - 1.0F));
+            paid++;
+        }
+        int hungerPaid = Math.min(requested - paid, food.getFoodLevel());
+        food.setFoodLevel(food.getFoodLevel() - hungerPaid);
+        return paid + hungerPaid;
     }
 
     private static void suppressVoluntaryMovement(LivingEntity entity) {
@@ -606,5 +808,29 @@ public final class KickManager {
             this.originalNoAi = originalNoAi;
             this.initialVelocity = lastVelocity;
         }
+    }
+
+    static record FirstBlockImpact(
+            Vec3 location, Direction face, double movementFraction) {
+        double safeMovementFraction(Vec3 movement) {
+            double normalSpeed = Math.max(BLOCK_SWEEP_EPSILON, switch (face.getAxis()) {
+                case X -> Math.abs(movement.x);
+                case Y -> Math.abs(movement.y);
+                case Z -> Math.abs(movement.z);
+            });
+            return Math.max(0.0D,
+                    movementFraction - BLOCK_SWEEP_EPSILON * 2.0D / normalSpeed);
+        }
+
+        double remainingSpeed(Vec3 movement) {
+            return switch (face.getAxis()) {
+                case X -> Math.sqrt(movement.y * movement.y + movement.z * movement.z);
+                case Y -> Math.sqrt(movement.x * movement.x + movement.z * movement.z);
+                case Z -> Math.sqrt(movement.x * movement.x + movement.y * movement.y);
+            };
+        }
+    }
+
+    private record SweptBoxHit(Direction face, double movementFraction) {
     }
 }

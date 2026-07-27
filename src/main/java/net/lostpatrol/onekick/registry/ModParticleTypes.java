@@ -16,6 +16,8 @@ public final class ModParticleTypes {
             PARTICLE_TYPES.register("mach_ring", () -> new SimpleParticleType(false));
     public static final RegistryObject<SimpleParticleType> MACH_TRAIL =
             PARTICLE_TYPES.register("mach_trail", () -> new SimpleParticleType(false));
+    public static final RegistryObject<SimpleParticleType> DISINTEGRATION_SMOKE =
+            PARTICLE_TYPES.register("disintegration_smoke", () -> new SimpleParticleType(false));
 
     private ModParticleTypes() {
     }

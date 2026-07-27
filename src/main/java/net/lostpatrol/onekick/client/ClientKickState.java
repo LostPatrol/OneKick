@@ -16,6 +16,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
@@ -31,7 +32,6 @@ import net.minecraft.world.phys.Vec3;
 public final class ClientKickState {
     private static final double MACH_RING_RADIUS_MULTIPLIER = 2.4D;
     private static final double MACH_RING_START_DISTANCE = 4.0D;
-    private static final double MACH_RING_INTERVAL = 21.375D;
     private static final int MACH_RING_MIN_POINTS = 40;
     private static final int MACH_RING_MAX_POINTS = 144;
     private static final int MACH_RING_MIN_LAYERS = 2;
@@ -59,6 +59,10 @@ public final class ClientKickState {
                 visual.update(value, maximum, chargeLevel);
                 return visual;
             });
+            PlayerAnimation animation = PLAYER_ANIMATIONS.get(entityId);
+            if (animation != null && animation.animation() == KickNetwork.ANIMATION_CHARGE) {
+                PLAYER_ANIMATIONS.put(entityId, animation.withChargeLevel(chargeLevel));
+            }
         } else {
             CHARGING_PLAYERS.remove(entityId);
         }
@@ -75,7 +79,20 @@ public final class ClientKickState {
             PLAYER_ANIMATIONS.remove(entityId);
             return;
         }
-        PLAYER_ANIMATIONS.put(entityId, new PlayerAnimation(animation, gameTime()));
+        long startedAt = gameTime();
+        PlayerAnimation previous = PLAYER_ANIMATIONS.get(entityId);
+        boolean startedFromCharge = animation == KickNetwork.ANIMATION_KICK
+                && previous != null
+                && previous.animation() == KickNetwork.ANIMATION_CHARGE;
+        KickAnimation.Pose startPose = startedFromCharge
+                ? KickAnimation.chargePose(previous.chargeLevel(), startedAt)
+                : KickAnimation.READY_POSE;
+        ChargeVisual visual = CHARGING_PLAYERS.get(entityId);
+        int chargeLevel = animation == KickNetwork.ANIMATION_CHARGE && visual != null
+                ? Mth.clamp(visual.level, 1, 5)
+                : 1;
+        PLAYER_ANIMATIONS.put(entityId,
+                new PlayerAnimation(animation, startedAt, chargeLevel, startPose));
     }
 
     public static void updateKickedEntity(
@@ -86,6 +103,61 @@ public final class ClientKickState {
         }
         KICKED_ENTITIES.put(entityId,
                 new KickedVisual(spin, gameTime(), Math.max(0.0D, visualSpeed), initialVelocity));
+    }
+
+    public static void emitDisintegrationSmoke(
+            Vec3 impact,
+            Vec3 direction,
+            double impactSpeed,
+            int affectedBlocks,
+            List<BlockPos> smokeOrigins) {
+        ClientLevel level = Minecraft.getInstance().level;
+        if (level == null || affectedBlocks <= 0 || smokeOrigins.isEmpty()) {
+            return;
+        }
+        Vec3 axis = direction.lengthSqr() < 1.0E-6D
+                ? new Vec3(0.0D, 0.0D, 1.0D)
+                : direction.normalize();
+        Vec3 first = axis.cross(new Vec3(0.0D, 1.0D, 0.0D));
+        if (first.lengthSqr() < 1.0E-4D) {
+            first = axis.cross(new Vec3(1.0D, 0.0D, 0.0D));
+        }
+        first = first.normalize();
+        Vec3 second = axis.cross(first).normalize();
+        int count = KickMath.disintegrationSmokeParticleCount(affectedBlocks, impactSpeed);
+        for (int i = 0; i < count; i++) {
+            int originIndex = count == 1
+                    ? smokeOrigins.size() / 2
+                    : (int) Math.round(i * (smokeOrigins.size() - 1.0D) / (count - 1.0D));
+            Vec3 origin = Vec3.atCenterOf(smokeOrigins.get(originIndex));
+            Vec3 relative = origin.subtract(impact);
+            double along = relative.dot(axis);
+            Vec3 radial = relative.subtract(axis.scale(along));
+            Vec3 outward;
+            if (radial.lengthSqr() > 1.0E-4D) {
+                outward = radial.normalize();
+            } else {
+                double angle = level.random.nextDouble() * Mth.TWO_PI;
+                outward = first.scale(Math.cos(angle)).add(second.scale(Math.sin(angle)));
+            }
+            Vec3 point = origin.add(
+                    (level.random.nextDouble() - 0.5D) * 0.9D,
+                    (level.random.nextDouble() - 0.5D) * 0.9D,
+                    (level.random.nextDouble() - 0.5D) * 0.9D);
+            Vec3 scatter = new Vec3(
+                    level.random.nextDouble() - 0.5D,
+                    level.random.nextDouble() - 0.5D,
+                    level.random.nextDouble() - 0.5D).scale(0.28D);
+            Vec3 flight = axis.scale(-1.0D).add(outward.scale(0.42D)).add(scatter);
+            if (flight.lengthSqr() < 1.0E-4D) {
+                flight = axis.scale(-1.0D);
+            }
+            double strength = KickMath.disintegrationSmokeInitialSpeed(
+                    impactSpeed, level.random.nextDouble());
+            Vec3 velocity = flight.normalize().scale(strength);
+            level.addAlwaysVisibleParticle(ModParticleTypes.DISINTEGRATION_SMOKE.get(), true,
+                    point.x, point.y, point.z, velocity.x, velocity.y, velocity.z);
+        }
     }
 
     public static void tickParticles(Minecraft minecraft) {
@@ -123,34 +195,43 @@ public final class ClientKickState {
         }
     }
 
-    public static void applyPlayerPose(
+    public static boolean applyPlayerPose(
             AbstractClientPlayer player, ModelPart rightLeg, ModelPart rightPants, float partialTick) {
         PlayerAnimation animation = PLAYER_ANIMATIONS.get(player.getId());
         if (animation == null) {
-            return;
+            return false;
         }
         float elapsed = (float) (gameTime() - animation.startedAt()) + partialTick;
         if (animation.animation() == KickNetwork.ANIMATION_KICK) {
-            float progress = elapsed / 8.0F;
-            if (progress >= 1.0F) {
+            if (elapsed >= KickAnimation.KICK_DURATION_TICKS) {
                 PLAYER_ANIMATIONS.remove(player.getId());
-                return;
+                return false;
             }
-            float extension = (float) Math.sin(Math.PI * progress);
-            rightLeg.xRot = -1.65F * extension;
-            rightLeg.yRot = 0.12F * extension;
-            rightLeg.zRot = -0.08F * extension;
+            applyPose(rightLeg, KickAnimation.kickPose(animation.startPose(), elapsed));
         } else if (animation.animation() == KickNetwork.ANIMATION_CHARGE) {
             if (!player.onGround() || player.isSprinting() || player.isFallFlying()
                     || player.isSwimming() || player.isPassenger()) {
-                return;
+                return false;
             }
-            float phase = (player.tickCount + partialTick) * 0.12F;
-            rightLeg.xRot = -0.85F + (float) Math.sin(phase) * 0.22F;
-            rightLeg.yRot = (float) Math.sin(phase) * 0.36F;
-            rightLeg.zRot = (float) Math.cos(phase) * 0.28F;
+            ChargeVisual visual = CHARGING_PLAYERS.get(player.getId());
+            int chargeLevel = visual == null
+                    ? animation.chargeLevel()
+                    : Mth.clamp(visual.level, 1, 5);
+            applyPose(rightLeg, KickAnimation.chargePose(chargeLevel, gameTime() + partialTick));
+        } else {
+            return false;
         }
         rightPants.copyFrom(rightLeg);
+        return true;
+    }
+
+    public static float firstPersonLegDepth(AbstractClientPlayer player, float partialTick) {
+        PlayerAnimation animation = PLAYER_ANIMATIONS.get(player.getId());
+        if (animation != null && animation.animation() == KickNetwork.ANIMATION_KICK) {
+            float elapsed = (float) (gameTime() - animation.startedAt()) + partialTick;
+            return KickAnimation.firstPersonDepth(elapsed);
+        }
+        return -0.28F;
     }
 
     public static boolean shouldSpin(LivingEntity entity) {
@@ -456,7 +537,7 @@ public final class ClientKickState {
             return;
         }
         int ringCount = KickMath.machRingCount(visual.visualSpeed);
-        int smokeRingCount = (ringCount + 1) / 2;
+        double ringInterval = KickMath.machRingInterval(visual.visualSpeed);
         double baseRadius = Math.max(1.05D,
                 entity.getBbWidth() * 0.75D + entity.getBbHeight() * 0.2D)
                 * MACH_RING_RADIUS_MULTIPLIER;
@@ -471,10 +552,10 @@ public final class ClientKickState {
             if (segmentLength > 1.0E-6D) {
                 double segmentEnd = travelled + segmentLength;
                 while (ringIndex < ringCount
-                        && MACH_RING_START_DISTANCE + ringIndex * MACH_RING_INTERVAL
+                        && MACH_RING_START_DISTANCE + ringIndex * ringInterval
                                 <= segmentEnd + 1.0E-6D) {
                     double targetDistance = MACH_RING_START_DISTANCE
-                            + ringIndex * MACH_RING_INTERVAL;
+                            + ringIndex * ringInterval;
                     double progress = Mth.clamp(
                             (targetDistance - travelled) / segmentLength, 0.0D, 1.0D);
                     Vec3 direction = velocity.normalize();
@@ -482,8 +563,11 @@ public final class ClientKickState {
                     double radius = baseRadius
                             * KickMath.machRingRadiusScale(ringIndex, visual.visualSpeed);
                     long arrivalTime = visual.startedAt + Math.max(0L, Math.round(tick + progress));
+                    double trailLength = ringIndex == 0
+                            ? MACH_RING_START_DISTANCE
+                            : ringInterval;
                     visual.machRings.add(new MachRing(
-                            center, direction, radius, arrivalTime, ringIndex < smokeRingCount));
+                            center, direction, radius, arrivalTime, trailLength));
                     ringIndex++;
                 }
                 position = position.add(velocity);
@@ -502,9 +586,8 @@ public final class ClientKickState {
             }
             emitMachRing(level, ring.center, ring.direction, ring.radius,
                     KickMath.machRingLifetimeTicks(visual.visualSpeed));
-            if (ring.smokeTrail) {
-                emitMachTrail(level, ring.center, ring.direction, ring.radius, visual.visualSpeed);
-            }
+            emitMachTrail(level, ring.center, ring.direction,
+                    ring.trailLength, visual.visualSpeed);
             visual.nextMachRing++;
         }
     }
@@ -544,7 +627,7 @@ public final class ClientKickState {
                 MACH_RING_MIN_POINTS, MACH_RING_MAX_POINTS);
         int layers = Mth.clamp((int) Math.ceil(radius * 0.55D),
                 MACH_RING_MIN_LAYERS, MACH_RING_MAX_LAYERS);
-        double thickness = radius * 0.18D;
+        double thickness = radius * 0.117D;
         for (int i = 0; i < points; i++) {
             double angleStep = Math.PI * 2.0D / points;
             double angle = angleStep * i
@@ -565,29 +648,33 @@ public final class ClientKickState {
     }
 
     private static void emitMachTrail(
-            ClientLevel level, Vec3 center, Vec3 direction, double ringRadius, double launchSpeed) {
+            ClientLevel level,
+            Vec3 center,
+            Vec3 direction,
+            double trailLength,
+            double launchSpeed) {
         Vec3 first = direction.cross(new Vec3(0.0D, 1.0D, 0.0D));
         if (first.lengthSqr() < 1.0E-4D) {
             first = direction.cross(new Vec3(1.0D, 0.0D, 0.0D));
         }
         first = first.normalize();
         Vec3 second = direction.cross(first).normalize();
-        double length = KickMath.machTrailLength(launchSpeed);
-        double radius = Math.max(0.35D,
-                ringRadius * KickMath.machTrailThicknessScale(launchSpeed));
         int lifetimeTicks = KickMath.machTrailLifetimeTicks(launchSpeed);
-        int particles = Mth.clamp((int) Math.ceil(length * (2.2D + radius * 1.8D)), 64, 240);
-        double particleSize = Mth.clamp(radius * 0.65D, 0.4D, 1.4D);
+        int particles = Math.max(10, Mth.ceil(trailLength * 2.5D));
         for (int i = 0; i < particles; i++) {
-            double along = length * ((i + level.random.nextDouble()) / particles - 0.5D);
-            double radialDistance = Math.sqrt(level.random.nextDouble()) * radius;
-            double angle = level.random.nextDouble() * Mth.TWO_PI;
-            Vec3 radial = first.scale(Math.cos(angle) * radialDistance)
-                    .add(second.scale(Math.sin(angle) * radialDistance));
-            Vec3 point = center.add(direction.scale(along)).add(radial);
+            double along = trailLength * (i + level.random.nextDouble()) / particles;
+            Vec3 jitter = first.scale(level.random.nextGaussian() * 0.035D)
+                    .add(second.scale(level.random.nextGaussian() * 0.035D));
+            Vec3 point = center.subtract(direction.scale(along)).add(jitter);
             level.addAlwaysVisibleParticle(ModParticleTypes.MACH_TRAIL.get(), true,
-                    point.x, point.y, point.z, lifetimeTicks, particleSize, 0.0D);
+                    point.x, point.y, point.z, lifetimeTicks, 0.0D, 0.0D);
         }
+    }
+
+    private static void applyPose(ModelPart part, KickAnimation.Pose pose) {
+        part.xRot = pose.xRot();
+        part.yRot = pose.yRot();
+        part.zRot = pose.zRot();
     }
 
     private static int chargeColor(float value) {
@@ -608,7 +695,15 @@ public final class ClientKickState {
         return minecraft.level == null ? 0L : minecraft.level.getGameTime();
     }
 
-    private record PlayerAnimation(byte animation, long startedAt) {
+    private record PlayerAnimation(
+            byte animation,
+            long startedAt,
+            int chargeLevel,
+            KickAnimation.Pose startPose) {
+        private PlayerAnimation withChargeLevel(int level) {
+            return new PlayerAnimation(
+                    animation, startedAt, Mth.clamp(level, 1, 5), startPose);
+        }
     }
 
     private static final class ChargeVisual {
@@ -666,6 +761,6 @@ public final class ClientKickState {
     }
 
     private record MachRing(
-            Vec3 center, Vec3 direction, double radius, long arrivalTime, boolean smokeTrail) {
+            Vec3 center, Vec3 direction, double radius, long arrivalTime, double trailLength) {
     }
 }
