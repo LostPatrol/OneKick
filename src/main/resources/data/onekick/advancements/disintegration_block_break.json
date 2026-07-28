@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:charged_kick",
+  "display": {
+    "icon": {
+      "item": "minecraft:iron_pickaxe"
+    },
+    "title": {
+      "translate": "advancements.onekick.disintegration_block_break.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.disintegration_block_break.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "disintegration_block_break": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "disintegration_block_break"
+      }
+    }
+  }
+}

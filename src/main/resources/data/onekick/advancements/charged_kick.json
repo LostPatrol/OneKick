@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:root",
+  "display": {
+    "icon": {
+      "item": "minecraft:iron_boots"
+    },
+    "title": {
+      "translate": "advancements.onekick.charged_kick.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.charged_kick.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "charged_kick": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "charged_kick"
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:disintegration_block_break",
+  "display": {
+    "icon": {
+      "item": "minecraft:elytra"
+    },
+    "title": {
+      "translate": "advancements.onekick.mass_destruction.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.mass_destruction.description"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "mass_destruction": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "mass_destruction"
+      }
+    }
+  }
+}

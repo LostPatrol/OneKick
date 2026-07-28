@@ -6,7 +6,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import javax.annotation.Nullable;
+import net.lostpatrol.onekick.advancement.KickAdvancementTrigger;
+import net.lostpatrol.onekick.advancement.ModCriteriaTriggers;
 import net.lostpatrol.onekick.network.KickNetwork;
+import net.lostpatrol.onekick.registry.ModEnchantments;
 import net.lostpatrol.onekick.registry.ModTags;
 import net.lostpatrol.onekick.world.BlockImpactService;
 import net.minecraft.core.BlockPos;
@@ -108,6 +111,11 @@ public final class KickManager {
                 state.chargeFoodDebt += KickMath.chargeFoodCost(increase);
                 consumeChargeFood(player, state);
             }
+            if (state.charge >= state.chargeMaximum
+                    && isMaximumCharge(currentEnchantments, state.charge)) {
+                ModCriteriaTriggers.trigger(
+                        player, KickAdvancementTrigger.Event.MAXIMUM_CHARGE);
+            }
         }
         if ((player.tickCount & 1) == 0) {
             KickNetwork.broadcastChargeState(
@@ -185,8 +193,9 @@ public final class KickManager {
                     ? actualMovement.length()
                     : firstImpactRemainingSpeed;
             float damage = KickMath.collisionDamage(beforeSpeed, afterSpeed, overloadLevel);
-            if (damage > 0.0F) {
-                entity.hurt(level.damageSources().flyIntoWall(), damage);
+            if (damage > 0.0F
+                    && entity.hurt(level.damageSources().flyIntoWall(), damage)) {
+                recordKickDamage(level, state, damage);
             }
             Vec3 impact = entityCollision == null
                     ? firstBlockImpact == null
@@ -296,11 +305,15 @@ public final class KickManager {
 
         KickEffects.playKick(player, charge);
         KickNetwork.broadcastPlayerAnimation(player, KickNetwork.ANIMATION_KICK);
+        ModCriteriaTriggers.trigger(player, KickAdvancementTrigger.Event.KICK);
+        if (charge > 0.0F) {
+            ModCriteriaTriggers.trigger(player, KickAdvancementTrigger.Event.CHARGED_KICK);
+        }
         if (aim.entity() instanceof LivingEntity target
                 && target.isAlive()
                 && !(target instanceof EnderDragon)
                 && !target.getType().is(ModTags.KICK_IMMUNE)) {
-            kickEntity(player, target, boots, enchantments, kickSpeed);
+            kickEntity(player, target, boots, enchantments, kickSpeed, charge);
             return;
         }
 
@@ -308,8 +321,13 @@ public final class KickManager {
                 && enchantments.aerodynamics() > 0
                 && aim.type() == AimType.BLOCK;
         if (airborneBlockCountsAsAir || aim.type() == AimType.AIR) {
+            if (enchantments.aerodynamics() > 0) {
+                ModCriteriaTriggers.trigger(
+                        player, KickAdvancementTrigger.Event.AERODYNAMIC_AIR_KICK);
+            }
             applyAerodynamics(player, playerState, enchantments.aerodynamics(), kickSpeed);
         } else if (aim.type() == AimType.BLOCK && enchantments.reaction() > 0) {
+            ModCriteriaTriggers.trigger(player, KickAdvancementTrigger.Event.REACTION_HIT);
             applyBlockReaction(player, kickSpeed);
         }
     }
@@ -319,11 +337,13 @@ public final class KickManager {
             LivingEntity target,
             ItemStack boots,
             KickEnchantments enchantments,
-            double kickSpeed) {
+            double kickSpeed,
+            float charge) {
         Vec3 look = player.getLookAngle().normalize();
         Vec3 launchDirection = KickMath.launchDirection(look);
         double launchSpeed = KickMath.launchSpeed(kickSpeed, target);
         if (enchantments.reaction() > 0) {
+            ModCriteriaTriggers.trigger(player, KickAdvancementTrigger.Event.REACTION_HIT);
             applyEntityReaction(player, look, kickSpeed);
         }
         if (!target.isAlive()) {
@@ -339,6 +359,16 @@ public final class KickManager {
                 && !target.getType().is(ModTags.FLYING);
         KickSnapshot snapshot = new KickSnapshot(player.getUUID(), kickSpeed, enchantments, boots);
         startKickedMotion(target, snapshot, velocity, spin);
+        if (spin) {
+            ModCriteriaTriggers.trigger(
+                    player, KickAdvancementTrigger.Event.ANGULAR_MOMENTUM_SPIN);
+        }
+        if (launchSpeed >= KickMath.MACH_RING_MIN_SPEED) {
+            ModCriteriaTriggers.trigger(player, KickAdvancementTrigger.Event.MACH_LAUNCH);
+        }
+        if (isUltimateKick(enchantments, charge)) {
+            ModCriteriaTriggers.trigger(player, KickAdvancementTrigger.Event.ULTIMATE_KICK);
+        }
     }
 
     static void startKickedMotion(
@@ -407,7 +437,9 @@ public final class KickManager {
             float damage = KickMath.traversalDamage(
                     state.traversalSpeed, state.snapshot.enchantments().kineticOverload());
             entity.invulnerableTime = 0;
-            entity.hurt(level.damageSources().flyIntoWall(), damage);
+            if (entity.hurt(level.damageSources().flyIntoWall(), damage)) {
+                recordKickDamage(level, state, damage);
+            }
             if (!entity.isAlive()) {
                 stopTracking(entity);
                 return;
@@ -423,6 +455,40 @@ public final class KickManager {
             return;
         }
         storeControlledMotion(entity, forcedVelocity);
+    }
+
+    private static void recordKickDamage(
+            ServerLevel level, KickedMotionState state, float damage) {
+        state.attributedDamage += damage;
+        if (!state.massiveDamageTriggered
+                && state.attributedDamage >= ModCriteriaTriggers.MASSIVE_DAMAGE) {
+            ServerPlayer attacker = state.snapshot.attacker(level);
+            if (attacker != null) {
+                ModCriteriaTriggers.trigger(
+                        attacker, KickAdvancementTrigger.Event.MASSIVE_DAMAGE);
+                state.massiveDamageTriggered = true;
+            }
+        }
+    }
+
+    private static boolean isMaximumCharge(
+            KickEnchantments enchantments, float charge) {
+        int maximumChargeLevel = ModEnchantments.CHARGE.get().getMaxLevel();
+        int maximumOverchargeLevel = ModEnchantments.OVERCHARGE.get().getMaxLevel();
+        return enchantments.charge() >= maximumChargeLevel
+                && enchantments.overcharge() >= maximumOverchargeLevel
+                && charge >= KickMath.maxCharge(maximumChargeLevel, maximumOverchargeLevel);
+    }
+
+    private static boolean isUltimateKick(
+            KickEnchantments enchantments, float charge) {
+        return isMaximumCharge(enchantments, charge)
+                && enchantments.kineticOverload()
+                >= ModEnchantments.KINETIC_OVERLOAD.get().getMaxLevel()
+                && enchantments.unstableCollision()
+                >= ModEnchantments.UNSTABLE_COLLISION.get().getMaxLevel()
+                && enchantments.disintegration()
+                >= ModEnchantments.DISINTEGRATION.get().getMaxLevel();
     }
 
     private static void applyBlockReaction(ServerPlayer player, double kickSpeed) {
@@ -790,6 +856,8 @@ public final class KickManager {
         private double traversalRemaining;
         private double traversalSpeed;
         private int traversalTicks;
+        private float attributedDamage;
+        private boolean massiveDamageTriggered;
 
         private KickedMotionState(
                 KickSnapshot snapshot,

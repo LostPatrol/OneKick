@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:charged_kick",
+  "display": {
+    "icon": {
+      "item": "minecraft:ender_pearl"
+    },
+    "title": {
+      "translate": "advancements.onekick.mach_launch.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.mach_launch.description"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "mach_launch": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "mach_launch"
+      }
+    }
+  }
+}

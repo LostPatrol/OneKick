@@ -5,11 +5,15 @@ import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.UUID;
 import net.lostpatrol.onekick.OneKick;
+import net.lostpatrol.onekick.advancement.KickAdvancementTrigger;
+import net.lostpatrol.onekick.advancement.ModCriteriaTriggers;
 import net.lostpatrol.onekick.config.OneKickConfig;
 import net.lostpatrol.onekick.world.BlockImpactService;
+import net.minecraft.advancements.Advancement;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.entity.EntityType;
@@ -49,6 +53,23 @@ public final class KickGameTests {
                     "The kick itself changed the target's health");
             helper.succeed();
         });
+    }
+
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void customKickCriterionAwardsLoadedAdvancement(GameTestHelper helper) {
+        ServerPlayer player = registerSnapshotAttacker(helper);
+        Advancement advancement = helper.getLevel().getServer().getAdvancements().getAdvancement(
+                ResourceLocation.fromNamespaceAndPath(OneKick.MOD_ID, "root"));
+        try {
+            helper.assertTrue(advancement != null, "OneKick root advancement was not loaded");
+            ModCriteriaTriggers.trigger(player, KickAdvancementTrigger.Event.KICK);
+            helper.assertTrue(
+                    player.getAdvancements().getOrStartProgress(advancement).isDone(),
+                    "Custom kick criterion did not award the root advancement");
+            helper.succeed();
+        } finally {
+            unregisterSnapshotAttacker(helper, player);
+        }
     }
 
     @GameTest(template = "flight_room", timeoutTicks = 20)

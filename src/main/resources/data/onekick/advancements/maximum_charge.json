@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:charged_kick",
+  "display": {
+    "icon": {
+      "item": "minecraft:creeper_spawn_egg"
+    },
+    "title": {
+      "translate": "advancements.onekick.maximum_charge.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.maximum_charge.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "maximum_charge": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "maximum_charge"
+      }
+    }
+  }
+}

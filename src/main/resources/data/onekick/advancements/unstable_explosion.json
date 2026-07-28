@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:charged_kick",
+  "display": {
+    "icon": {
+      "item": "minecraft:tnt"
+    },
+    "title": {
+      "translate": "advancements.onekick.unstable_explosion.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.unstable_explosion.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "unstable_explosion": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "unstable_explosion"
+      }
+    }
+  }
+}

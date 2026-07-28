@@ -15,6 +15,8 @@ Boot enchantments expand the move:
 - **Conservation of Angular Momentum** makes creatures kicked upward spin until they land.
 - Vanilla **Silk Touch** can be enchanted onto boots and preserves drops from kick-driven block destruction, unless the server's Kinetic Overload drop protection is active.
 
+The mod also includes a dedicated advancement tab with 13 milestones, ranging from a first kick to maximum charge, Mach-ring launches, large-scale destruction, and the fully enchanted **One Kick!**
+
 ## Requirements
 
 - Minecraft 1.20.1

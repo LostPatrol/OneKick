@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:mach_launch",
+  "display": {
+    "icon": {
+      "item": "minecraft:netherite_boots"
+    },
+    "title": {
+      "translate": "advancements.onekick.massive_damage.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.massive_damage.description"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "massive_damage": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "massive_damage"
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:root",
+  "display": {
+    "icon": {
+      "item": "minecraft:compass"
+    },
+    "title": {
+      "translate": "advancements.onekick.angular_momentum_spin.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.angular_momentum_spin.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "angular_momentum_spin": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "angular_momentum_spin"
+      }
+    }
+  }
+}

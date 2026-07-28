@@ -1,5 +1,6 @@
 package net.lostpatrol.onekick;
 
+import net.lostpatrol.onekick.advancement.ModCriteriaTriggers;
 import net.lostpatrol.onekick.config.OneKickConfig;
 import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModEnchantments;
@@ -22,6 +23,7 @@ public final class OneKick {
         ModEnchantments.register(modBus);
         ModEntityTypes.register(modBus);
         ModParticleTypes.register(modBus);
+        ModCriteriaTriggers.register();
         modBus.addListener(this::commonSetup);
         KickNetwork.register();
     }

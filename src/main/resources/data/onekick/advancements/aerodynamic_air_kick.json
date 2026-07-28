@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:root",
+  "display": {
+    "icon": {
+      "item": "minecraft:feather"
+    },
+    "title": {
+      "translate": "advancements.onekick.aerodynamic_air_kick.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.aerodynamic_air_kick.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "aerodynamic_air_kick": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "aerodynamic_air_kick"
+      }
+    }
+  }
+}

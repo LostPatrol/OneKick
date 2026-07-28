@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:root",
+  "display": {
+    "icon": {
+      "item": "minecraft:piston"
+    },
+    "title": {
+      "translate": "advancements.onekick.reaction_hit.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.reaction_hit.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "reaction_hit": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "reaction_hit"
+      }
+    }
+  }
+}
