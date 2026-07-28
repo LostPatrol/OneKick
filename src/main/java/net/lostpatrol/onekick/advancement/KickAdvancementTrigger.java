@@ -1,37 +1,20 @@
 package net.lostpatrol.onekick.advancement;
 
-import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.Arrays;
-import net.minecraft.advancements.critereon.AbstractCriterionTriggerInstance;
+import java.util.Optional;
 import net.minecraft.advancements.critereon.ContextAwarePredicate;
-import net.minecraft.advancements.critereon.DeserializationContext;
-import net.minecraft.advancements.critereon.SerializationContext;
+import net.minecraft.advancements.critereon.EntityPredicate;
 import net.minecraft.advancements.critereon.SimpleCriterionTrigger;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.GsonHelper;
 
 public final class KickAdvancementTrigger
         extends SimpleCriterionTrigger<KickAdvancementTrigger.TriggerInstance> {
-    private final ResourceLocation id;
-
-    public KickAdvancementTrigger(ResourceLocation id) {
-        this.id = id;
-    }
-
     @Override
-    public ResourceLocation getId() {
-        return id;
-    }
-
-    @Override
-    protected TriggerInstance createInstance(
-            JsonObject json,
-            ContextAwarePredicate player,
-            DeserializationContext context) {
-        return new TriggerInstance(id, player,
-                Event.fromName(GsonHelper.getAsString(json, "event")));
+    public Codec<TriggerInstance> codec() {
+        return TriggerInstance.CODEC;
     }
 
     public void trigger(ServerPlayer player, Event event) {
@@ -53,6 +36,8 @@ public final class KickAdvancementTrigger
         MASSIVE_DAMAGE("massive_damage"),
         ULTIMATE_KICK("ultimate_kick");
 
+        private static final Codec<Event> CODEC =
+                Codec.STRING.xmap(Event::fromName, Event::serializedName);
         private final String name;
 
         Event(String name) {
@@ -72,24 +57,20 @@ public final class KickAdvancementTrigger
         }
     }
 
-    public static final class TriggerInstance extends AbstractCriterionTriggerInstance {
-        private final Event event;
-
-        private TriggerInstance(
-                ResourceLocation id, ContextAwarePredicate player, Event event) {
-            super(id, player);
-            this.event = event;
-        }
+    public record TriggerInstance(
+            Optional<ContextAwarePredicate> player,
+            Event event
+    ) implements SimpleCriterionTrigger.SimpleInstance {
+        private static final Codec<TriggerInstance> CODEC = RecordCodecBuilder.create(
+                instance -> instance.group(
+                                EntityPredicate.ADVANCEMENT_CODEC.optionalFieldOf("player")
+                                        .forGetter(TriggerInstance::player),
+                                Event.CODEC.fieldOf("event")
+                                        .forGetter(TriggerInstance::event))
+                        .apply(instance, TriggerInstance::new));
 
         private boolean matches(Event event) {
             return this.event == event;
-        }
-
-        @Override
-        public JsonObject serializeToJson(SerializationContext context) {
-            JsonObject json = super.serializeToJson(context);
-            json.addProperty("event", event.serializedName());
-            return json;
         }
     }
 }

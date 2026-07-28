@@ -39,7 +39,7 @@ class AdvancementResourcesTest {
         Set<String> configuredEvents = new HashSet<>();
         for (Map.Entry<String, String> expected : ADVANCEMENTS.entrySet()) {
             JsonObject advancement = resourceJson(
-                    "data/onekick/advancements/" + expected.getKey() + ".json");
+                    "data/onekick/advancement/" + expected.getKey() + ".json");
             JsonObject criterion = advancement.getAsJsonObject("criteria")
                     .entrySet().iterator().next().getValue().getAsJsonObject();
             assertEquals("onekick:kick_event", criterion.get("trigger").getAsString());

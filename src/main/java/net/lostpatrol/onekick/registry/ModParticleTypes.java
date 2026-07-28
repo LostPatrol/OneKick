@@ -3,20 +3,20 @@ package net.lostpatrol.onekick.registry;
 import net.lostpatrol.onekick.OneKick;
 import net.minecraft.core.particles.ParticleType;
 import net.minecraft.core.particles.SimpleParticleType;
-import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.registries.DeferredRegister;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.registries.RegistryObject;
+import net.minecraft.core.registries.Registries;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.registries.DeferredHolder;
+import net.neoforged.neoforge.registries.DeferredRegister;
 
 public final class ModParticleTypes {
     private static final DeferredRegister<ParticleType<?>> PARTICLE_TYPES =
-            DeferredRegister.create(ForgeRegistries.PARTICLE_TYPES, OneKick.MOD_ID);
+            DeferredRegister.create(Registries.PARTICLE_TYPE, OneKick.MOD_ID);
 
-    public static final RegistryObject<SimpleParticleType> MACH_RING =
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> MACH_RING =
             PARTICLE_TYPES.register("mach_ring", () -> new SimpleParticleType(false));
-    public static final RegistryObject<SimpleParticleType> MACH_TRAIL =
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> MACH_TRAIL =
             PARTICLE_TYPES.register("mach_trail", () -> new SimpleParticleType(false));
-    public static final RegistryObject<SimpleParticleType> DISINTEGRATION_SMOKE =
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> DISINTEGRATION_SMOKE =
             PARTICLE_TYPES.register("disintegration_smoke", () -> new SimpleParticleType(false));
 
     private ModParticleTypes() {

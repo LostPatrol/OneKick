@@ -18,20 +18,22 @@ import net.lostpatrol.onekick.kick.KickSnapshot;
 import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModTags;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.protocol.game.ClientboundExplodePacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.enchantment.ProtectionEnchantment;
 import net.minecraft.world.level.Explosion;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -40,9 +42,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.ForgeEventFactory;
-import net.minecraftforge.event.level.BlockEvent;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.EventHooks;
+import net.neoforged.neoforge.event.level.BlockEvent;
 
 public final class BlockImpactService {
     private static final int MAX_DEBRIS_PER_IMPACT = 64;
@@ -184,16 +186,28 @@ public final class BlockImpactService {
         DamageSource damageSource = attacker == null
                 ? level.damageSources().explosion(null, null)
                 : level.damageSources().explosion(attacker, attacker);
-        Explosion visualExplosion = new Explosion(level, excludedEntity, damageSource, null,
-                position.x, position.y, position.z, power, false, Explosion.BlockInteraction.KEEP);
-        if (ForgeEventFactory.onExplosionStart(level, visualExplosion)) {
+        Explosion visualExplosion = new Explosion(
+                level,
+                excludedEntity,
+                damageSource,
+                null,
+                position.x,
+                position.y,
+                position.z,
+                power,
+                false,
+                Explosion.BlockInteraction.KEEP,
+                ParticleTypes.EXPLOSION,
+                ParticleTypes.EXPLOSION_EMITTER,
+                SoundEvents.GENERIC_EXPLODE);
+        if (EventHooks.onExplosionStart(level, visualExplosion)) {
             return ExplosionResult.CANCELLED;
         }
         DROP_SAFE_EXPLOSIONS.add(visualExplosion);
         try {
             if (power >= BLOCK_RAY_FREE_MIN_POWER) {
                 explodeEntitiesWithoutBlockRays(
-                        level, excludedEntity, position, power, visualExplosion);
+                        level, excludedEntity, position, power, visualExplosion, damageSource);
             } else {
                 visualExplosion.explode();
             }
@@ -215,7 +229,8 @@ public final class BlockImpactService {
             @Nullable Entity excludedEntity,
             Vec3 position,
             float power,
-            Explosion explosion) {
+            Explosion explosion,
+            DamageSource damageSource) {
         level.gameEvent(excludedEntity, GameEvent.EXPLODE, position);
         for (int i = 0; i < VANILLA_EXPLOSION_RAY_COUNT; i++) {
             level.random.nextFloat();
@@ -230,10 +245,10 @@ public final class BlockImpactService {
         int maxZ = Mth.floor(position.z + diameter + 1.0D);
         List<Entity> entities = level.getEntities(excludedEntity,
                 new AABB(minX, minY, minZ, maxX, maxY, maxZ));
-        ForgeEventFactory.onExplosionDetonate(level, explosion, entities, diameter);
+        EventHooks.onExplosionDetonate(level, explosion, entities, diameter);
 
         for (Entity entity : entities) {
-            if (entity.ignoreExplosion()) {
+            if (entity.ignoreExplosion(explosion)) {
                 continue;
             }
             double distanceRatio = Math.sqrt(entity.distanceToSqr(position)) / diameter;
@@ -256,22 +271,26 @@ public final class BlockImpactService {
             directionZ /= directionLength;
             double exposure = Explosion.getSeenPercent(position, entity);
             double impact = (1.0D - distanceRatio) * exposure;
-            entity.hurt(explosion.getDamageSource(),
+            entity.hurt(damageSource,
                     (float) ((int) ((impact * impact + impact) / 2.0D
                             * 7.0D * diameter + 1.0D)));
             double knockback = entity instanceof LivingEntity living
-                    ? ProtectionEnchantment.getExplosionKnockbackAfterDampener(living, impact)
+                    ? impact * (1.0D - living.getAttributeValue(
+                            Attributes.EXPLOSION_KNOCKBACK_RESISTANCE))
                     : impact;
             Vec3 knockbackVector = new Vec3(
                     directionX * knockback,
                     directionY * knockback,
                     directionZ * knockback);
+            knockbackVector = EventHooks.getExplosionKnockback(
+                    level, explosion, entity, knockbackVector);
             entity.setDeltaMovement(entity.getDeltaMovement().add(knockbackVector));
             if (entity instanceof Player player
                     && !player.isSpectator()
                     && (!player.isCreative() || !player.getAbilities().flying)) {
                 explosion.getHitPlayers().put(player, knockbackVector);
             }
+            entity.onExplosionHit(explosion.getIndirectSourceEntity());
         }
     }
 
@@ -282,7 +301,12 @@ public final class BlockImpactService {
             if (player.distanceToSqr(position.x, position.y, position.z) < 4096.0D) {
                 player.connection.send(new ClientboundExplodePacket(
                         position.x, position.y, position.z, power,
-                        explosion.getToBlow(), explosion.getHitPlayers().get(player)));
+                        explosion.getToBlow(),
+                        explosion.getHitPlayers().get(player),
+                        Explosion.BlockInteraction.KEEP,
+                        ParticleTypes.EXPLOSION,
+                        ParticleTypes.EXPLOSION_EMITTER,
+                        SoundEvents.GENERIC_EXPLODE));
             }
         }
     }
@@ -489,7 +513,7 @@ public final class BlockImpactService {
                 continue;
             }
             BlockEvent.BreakEvent breakEvent = new BlockEvent.BreakEvent(level, pos, state, attacker);
-            if (MinecraftForge.EVENT_BUS.post(breakEvent)) {
+            if (NeoForge.EVENT_BUS.post(breakEvent).isCanceled()) {
                 continue;
             }
 

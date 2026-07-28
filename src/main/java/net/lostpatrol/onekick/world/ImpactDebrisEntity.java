@@ -84,7 +84,8 @@ public final class ImpactDebrisEntity extends FallingBlockEntity {
     protected void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         if (!dropTool.isEmpty()) {
-            tag.put("OneKickDropTool", dropTool.save(new CompoundTag()));
+            tag.put("OneKickDropTool",
+                    dropTool.save(level().registryAccess(), new CompoundTag()));
         }
         if (ownerId != null) {
             tag.putUUID("OneKickOwner", ownerId);
@@ -96,7 +97,10 @@ public final class ImpactDebrisEntity extends FallingBlockEntity {
     @Override
     protected void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
-        dropTool = tag.contains("OneKickDropTool") ? ItemStack.of(tag.getCompound("OneKickDropTool")) : ItemStack.EMPTY;
+        dropTool = tag.contains("OneKickDropTool")
+                ? ItemStack.parseOptional(
+                        level().registryAccess(), tag.getCompound("OneKickDropTool"))
+                : ItemStack.EMPTY;
         ownerId = tag.hasUUID("OneKickOwner") ? tag.getUUID("OneKickOwner") : null;
         dropOnLanding = tag.getBoolean("OneKickDropOnLanding");
         dropsFinished = tag.getBoolean("OneKickDropsFinished");

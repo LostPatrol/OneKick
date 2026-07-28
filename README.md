@@ -2,7 +2,7 @@
 
 [简体中文](README_zh.md)
 
-One Kick is a Minecraft Forge mod built around one simple idea: kick things.
+One Kick is a Minecraft NeoForge mod built around one simple idea: kick things.
 
 Press **R** to kick in the direction you are looking. The key can be changed in Minecraft's Controls menu. Your movement speed and boot quality affect kick strength, while a target's maximum health affects how far it is launched. A launched creature takes kinetic damage if it hits a wall.
 
@@ -19,9 +19,9 @@ The mod also includes a dedicated advancement tab with 13 milestones, ranging fr
 
 ## Requirements
 
-- Minecraft 1.20.1
-- Minecraft Forge 47.4.10 or later in the 47.x series
-- Java 17
+- Minecraft 1.21.1
+- NeoForge 21.1.235 or later in the 21.1 series
+- Java 21
 
 ## Status
 

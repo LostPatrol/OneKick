@@ -1,0 +1,21 @@
+{
+  "anvil_cost": 2,
+  "description": {
+    "translate": "enchantment.onekick.charge"
+  },
+  "effects": {},
+  "max_cost": {
+    "base": 27,
+    "per_level_above_first": 7
+  },
+  "max_level": 5,
+  "min_cost": {
+    "base": 12,
+    "per_level_above_first": 7
+  },
+  "slots": [
+    "feet"
+  ],
+  "supported_items": "#onekick:enchantable/boots",
+  "weight": 5
+}

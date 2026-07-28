@@ -17,7 +17,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.player.PlayerModelPart;
-import net.minecraftforge.client.event.RenderHandEvent;
+import net.neoforged.neoforge.client.event.RenderHandEvent;
 
 final class FirstPersonKickRenderer {
     private static final int VISIBLE_LEG_START = 5;
@@ -70,12 +70,12 @@ final class FirstPersonKickRenderer {
         poseStack.scale(-0.90F, -0.90F, 0.90F);
         leg.render(poseStack,
                 event.getMultiBufferSource().getBuffer(RenderType.entityTranslucent(
-                        player.getSkinTextureLocation())),
+                        player.getSkin().texture())),
                 event.getPackedLight(), OverlayTexture.NO_OVERLAY);
         if (player.isModelPartShown(PlayerModelPart.RIGHT_PANTS_LEG)) {
             pants.render(poseStack,
                     event.getMultiBufferSource().getBuffer(RenderType.entityTranslucent(
-                            player.getSkinTextureLocation())),
+                            player.getSkin().texture())),
                     event.getPackedLight(), OverlayTexture.NO_OVERLAY);
         }
         poseStack.popPose();

@@ -1,0 +1,21 @@
+{
+  "anvil_cost": 8,
+  "description": {
+    "translate": "enchantment.onekick.overcharge"
+  },
+  "effects": {},
+  "max_cost": {
+    "base": 47,
+    "per_level_above_first": 18
+  },
+  "max_level": 2,
+  "min_cost": {
+    "base": 32,
+    "per_level_above_first": 18
+  },
+  "slots": [
+    "feet"
+  ],
+  "supported_items": "#onekick:enchantable/boots",
+  "weight": 1
+}

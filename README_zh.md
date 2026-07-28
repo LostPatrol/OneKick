@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-One Kick 是一款围绕“踢”展开的 Minecraft Forge 模组。
+One Kick 是一款围绕“踢”展开的 Minecraft NeoForge 模组。
 
 按 **R** 朝准星方向踢击；可以在游戏的“按键绑定”中修改按键。玩家移速和靴子品质会提高踢击力度，目标最大生命值越高则越难踢远。被踢飞的生物高速撞墙时会受到动能伤害。
 
@@ -19,9 +19,9 @@ One Kick 是一款围绕“踢”展开的 Minecraft Forge 模组。
 
 ## 运行要求
 
-- Minecraft 1.20.1
-- Minecraft Forge 47.4.10 或 47.x 系列中的更高版本
-- Java 17
+- Minecraft 1.21.1
+- NeoForge 21.1.235 或 21.1 系列中的更高版本
+- Java 21
 
 ## 当前状态
 

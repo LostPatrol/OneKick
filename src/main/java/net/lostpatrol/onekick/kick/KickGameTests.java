@@ -8,12 +8,16 @@ import net.lostpatrol.onekick.OneKick;
 import net.lostpatrol.onekick.advancement.KickAdvancementTrigger;
 import net.lostpatrol.onekick.advancement.ModCriteriaTriggers;
 import net.lostpatrol.onekick.config.OneKickConfig;
+import net.lostpatrol.onekick.registry.ModEnchantments;
 import net.lostpatrol.onekick.world.BlockImpactService;
-import net.minecraft.advancements.Advancement;
+import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.entity.EntityType;
@@ -21,18 +25,60 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.gametest.GameTestHolder;
-import net.minecraftforge.gametest.PrefixGameTestTemplate;
+import net.neoforged.neoforge.gametest.GameTestHolder;
+import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
 @GameTestHolder(OneKick.MOD_ID)
 @PrefixGameTestTemplate(false)
 public final class KickGameTests {
     private KickGameTests() {
+    }
+
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void dataDrivenEnchantmentsPreserveBootRulesAndCosts(GameTestHelper helper) {
+        var registry = helper.getLevel().registryAccess()
+                .lookupOrThrow(Registries.ENCHANTMENT);
+        Map<ResourceKey<Enchantment>, Integer> expectedMaximumLevels = Map.of(
+                ModEnchantments.REACTION, 1,
+                ModEnchantments.AERODYNAMICS, 3,
+                ModEnchantments.DISINTEGRATION, 1,
+                ModEnchantments.UNSTABLE_COLLISION, 3,
+                ModEnchantments.KINETIC_OVERLOAD, 3,
+                ModEnchantments.CHARGE, 5,
+                ModEnchantments.ANGULAR_MOMENTUM, 1,
+                ModEnchantments.OVERCHARGE, 2);
+        ItemStack boots = new ItemStack(Items.IRON_BOOTS);
+
+        for (var entry : expectedMaximumLevels.entrySet()) {
+            Enchantment enchantment = registry.getOrThrow(entry.getKey()).value();
+            helper.assertTrue(enchantment.isSupportedItem(boots),
+                    entry.getKey().location() + " does not support boots");
+            helper.assertTrue(enchantment.getMaxLevel() == entry.getValue(),
+                    entry.getKey().location() + " has the wrong maximum level");
+            for (int level = 1; level <= enchantment.getMaxLevel(); level++) {
+                helper.assertTrue(
+                        enchantment.getMaxCost(level) - enchantment.getMinCost(level) == 15,
+                        entry.getKey().location() + " changed its enchanting cost window");
+            }
+        }
+
+        var silkTouch = registry.getOrThrow(Enchantments.SILK_TOUCH);
+        helper.assertTrue(silkTouch.value().isSupportedItem(boots),
+                "Silk Touch no longer supports boots");
+        boots.enchant(registry.getOrThrow(ModEnchantments.CHARGE), 4);
+        boots.enchant(silkTouch, 1);
+        KickEnchantments enchantments = KickEnchantments.from(boots);
+        helper.assertTrue(enchantments.charge() == 4,
+                "Kick enchantment snapshot did not read data-driven Charge");
+        helper.assertTrue(enchantments.silkTouch(),
+                "Kick enchantment snapshot did not read boot Silk Touch");
+        helper.succeed();
     }
 
     @GameTest(template = "flight_room", timeoutTicks = 20)
@@ -58,7 +104,7 @@ public final class KickGameTests {
     @GameTest(template = "flight_room", timeoutTicks = 20)
     public static void customKickCriterionAwardsLoadedAdvancement(GameTestHelper helper) {
         ServerPlayer player = registerSnapshotAttacker(helper);
-        Advancement advancement = helper.getLevel().getServer().getAdvancements().getAdvancement(
+        AdvancementHolder advancement = helper.getLevel().getServer().getAdvancements().get(
                 ResourceLocation.fromNamespaceAndPath(OneKick.MOD_ID, "root"));
         try {
             helper.assertTrue(advancement != null, "OneKick root advancement was not loaded");
@@ -201,7 +247,11 @@ public final class KickGameTests {
                 .withPermission(4)
                 .withSuppressedOutput();
         ItemStack boots = new ItemStack(Items.IRON_BOOTS);
-        boots.enchant(Enchantments.SILK_TOUCH, 1);
+        boots.enchant(
+                helper.getLevel().registryAccess()
+                        .lookupOrThrow(Registries.ENCHANTMENT)
+                        .getOrThrow(Enchantments.SILK_TOUCH),
+                1);
         KickEnchantments enchantments = new KickEnchantments(
                 0, 0, 1, 0, 1, 0, 0, 0, true);
         KickSnapshot snapshot = new KickSnapshot(
@@ -210,9 +260,8 @@ public final class KickGameTests {
         Vec3 impact = helper.absoluteVec(new Vec3(5.5D, 3.0D, 2.5D));
 
         try {
-            int enableResult = helper.getLevel().getServer().getCommands().performPrefixedCommand(
+            helper.getLevel().getServer().getCommands().performPrefixedCommand(
                     commandSource, "onekick kinetic_overload_drop_protection true");
-            helper.assertTrue(enableResult == 1, "Could not enable Kinetic Overload drop protection");
             fillKineticOverloadDropProtectionVolume(helper);
             BlockPos chestPosition = helper.absolutePos(new BlockPos(7, 3, 2));
             helper.setBlock(7, 3, 2, Blocks.CHEST);
@@ -229,9 +278,8 @@ public final class KickGameTests {
             helper.assertTrue(countDiamondDrops(helper, impact) > 0,
                     "Kinetic Overload drop protection suppressed container contents");
 
-            int disableResult = helper.getLevel().getServer().getCommands().performPrefixedCommand(
+            helper.getLevel().getServer().getCommands().performPrefixedCommand(
                     commandSource, "onekick kinetic_overload_drop_protection false");
-            helper.assertTrue(disableResult == 1, "Could not disable Kinetic Overload drop protection");
             fillKineticOverloadDropProtectionVolume(helper);
             BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
                     new Vec3(1.0D, 0.0D, 0.0D), 1.0D, snapshot);
@@ -339,7 +387,8 @@ public final class KickGameTests {
         UUID attackerId = UUID.randomUUID();
         ServerPlayer attacker = new ServerPlayer(
                 helper.getLevel().getServer(), helper.getLevel(),
-                new GameProfile(attackerId, "onekick-drop-test"));
+                new GameProfile(attackerId, "onekick-drop-test"),
+                ClientInformation.createDefault());
         snapshotAttackers(helper).put(attackerId, attacker);
         return attacker;
     }

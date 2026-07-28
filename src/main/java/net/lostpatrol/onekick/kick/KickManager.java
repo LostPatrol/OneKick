@@ -473,8 +473,8 @@ public final class KickManager {
 
     private static boolean isMaximumCharge(
             KickEnchantments enchantments, float charge) {
-        int maximumChargeLevel = ModEnchantments.CHARGE.get().getMaxLevel();
-        int maximumOverchargeLevel = ModEnchantments.OVERCHARGE.get().getMaxLevel();
+        int maximumChargeLevel = ModEnchantments.MAX_CHARGE_LEVEL;
+        int maximumOverchargeLevel = ModEnchantments.MAX_OVERCHARGE_LEVEL;
         return enchantments.charge() >= maximumChargeLevel
                 && enchantments.overcharge() >= maximumOverchargeLevel
                 && charge >= KickMath.maxCharge(maximumChargeLevel, maximumOverchargeLevel);
@@ -484,11 +484,11 @@ public final class KickManager {
             KickEnchantments enchantments, float charge) {
         return isMaximumCharge(enchantments, charge)
                 && enchantments.kineticOverload()
-                >= ModEnchantments.KINETIC_OVERLOAD.get().getMaxLevel()
+                >= ModEnchantments.MAX_KINETIC_OVERLOAD_LEVEL
                 && enchantments.unstableCollision()
-                >= ModEnchantments.UNSTABLE_COLLISION.get().getMaxLevel()
+                >= ModEnchantments.MAX_UNSTABLE_COLLISION_LEVEL
                 && enchantments.disintegration()
-                >= ModEnchantments.DISINTEGRATION.get().getMaxLevel();
+                >= ModEnchantments.MAX_DISINTEGRATION_LEVEL;
     }
 
     private static void applyBlockReaction(ServerPlayer player, double kickSpeed) {

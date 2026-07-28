@@ -11,23 +11,27 @@ import net.lostpatrol.onekick.registry.ModParticleTypes;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.geom.ModelLayers;
+import net.minecraft.client.resources.PlayerSkin;
 import net.minecraft.client.renderer.entity.FallingBlockRenderer;
+import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.player.PlayerRenderer;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
-import net.minecraftforge.client.event.EntityRenderersEvent;
-import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.client.event.RegisterParticleProvidersEvent;
-import net.minecraftforge.client.event.RenderGuiOverlayEvent;
-import net.minecraftforge.client.event.RenderHandEvent;
-import net.minecraftforge.client.event.RenderLivingEvent;
-import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
-import net.minecraftforge.client.settings.KeyConflictContext;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.fml.util.ObfuscationReflectionHelper;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.event.RegisterParticleProvidersEvent;
+import net.neoforged.neoforge.client.event.RenderFrameEvent;
+import net.neoforged.neoforge.client.event.RenderGuiLayerEvent;
+import net.neoforged.neoforge.client.event.RenderHandEvent;
+import net.neoforged.neoforge.client.event.RenderLivingEvent;
+import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
+import net.neoforged.neoforge.client.settings.KeyConflictContext;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import org.lwjgl.glfw.GLFW;
 
 public final class ClientEvents {
@@ -45,7 +49,7 @@ public final class ClientEvents {
     private ClientEvents() {
     }
 
-    @Mod.EventBusSubscriber(modid = OneKick.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
+    @EventBusSubscriber(modid = OneKick.MOD_ID, value = Dist.CLIENT)
     public static final class ModBusEvents {
         private ModBusEvents() {
         }
@@ -71,26 +75,27 @@ public final class ClientEvents {
         @SubscribeEvent
         public static void replacePlayerModels(EntityRenderersEvent.AddLayers event) {
             FirstPersonKickRenderer.initialize();
-            for (String skin : event.getSkins()) {
-                if (event.getPlayerSkin(skin) instanceof PlayerRenderer renderer) {
-                    boolean slim = "slim".equals(skin);
-                    renderer.model = new KickPlayerModel(event.getEntityModels().bakeLayer(
-                            slim ? ModelLayers.PLAYER_SLIM : ModelLayers.PLAYER), slim);
+            for (PlayerSkin.Model skin : event.getSkins()) {
+                if (event.getSkin(skin) instanceof PlayerRenderer renderer) {
+                    boolean slim = skin == PlayerSkin.Model.SLIM;
+                    ObfuscationReflectionHelper.setPrivateValue(
+                            LivingEntityRenderer.class,
+                            renderer,
+                            new KickPlayerModel(event.getEntityModels().bakeLayer(
+                                    slim ? ModelLayers.PLAYER_SLIM : ModelLayers.PLAYER), slim),
+                            "model");
                 }
             }
         }
     }
 
-    @Mod.EventBusSubscriber(modid = OneKick.MOD_ID, value = Dist.CLIENT)
+    @EventBusSubscriber(modid = OneKick.MOD_ID, value = Dist.CLIENT)
     public static final class ForgeBusEvents {
         private ForgeBusEvents() {
         }
 
         @SubscribeEvent
-        public static void clientTick(TickEvent.ClientTickEvent event) {
-            if (event.phase != TickEvent.Phase.END) {
-                return;
-            }
+        public static void clientTick(ClientTickEvent.Post event) {
             Minecraft minecraft = Minecraft.getInstance();
             boolean keyDown = minecraft.player != null
                     && minecraft.getConnection() != null
@@ -104,10 +109,8 @@ public final class ClientEvents {
         }
 
         @SubscribeEvent
-        public static void renderTick(TickEvent.RenderTickEvent event) {
-            if (event.phase == TickEvent.Phase.START) {
-                firstPersonLegRendered = false;
-            }
+        public static void renderTick(RenderFrameEvent.Pre event) {
+            firstPersonLegRendered = false;
         }
 
         @SubscribeEvent
@@ -121,15 +124,15 @@ public final class ClientEvents {
         }
 
         @SubscribeEvent(priority = EventPriority.HIGHEST)
-        public static void renderHud(RenderGuiOverlayEvent.Pre event) {
+        public static void renderHud(RenderGuiLayerEvent.Pre event) {
             if (!ClientKickState.shouldRenderChargeHud()) {
                 return;
             }
-            if (event.getOverlay().id().equals(VanillaGuiOverlay.JUMP_BAR.id())) {
+            if (event.getName().equals(VanillaGuiLayers.JUMP_METER)) {
                 event.setCanceled(true);
-            } else if (event.getOverlay().id().equals(VanillaGuiOverlay.EXPERIENCE_BAR.id())) {
+            } else if (event.getName().equals(VanillaGuiLayers.EXPERIENCE_BAR)) {
                 ClientKickState.renderChargeHud(event.getGuiGraphics(),
-                        event.getWindow().getGuiScaledWidth(), event.getWindow().getGuiScaledHeight());
+                        event.getGuiGraphics().guiWidth(), event.getGuiGraphics().guiHeight());
                 event.setCanceled(true);
             }
         }

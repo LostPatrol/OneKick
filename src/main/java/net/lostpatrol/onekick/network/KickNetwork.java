@@ -2,25 +2,23 @@ package net.lostpatrol.onekick.network;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Supplier;
 import net.lostpatrol.onekick.OneKick;
 import net.lostpatrol.onekick.client.ClientKickState;
 import net.lostpatrol.onekick.kick.KickManager;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.NetworkDirection;
-import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.PacketDistributor;
-import net.minecraftforge.network.simple.SimpleChannel;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 public final class KickNetwork {
     public static final byte ANIMATION_CHARGE = 0;
@@ -28,53 +26,34 @@ public final class KickNetwork {
     public static final byte ANIMATION_STOP = 2;
     private static final String PROTOCOL = "5";
     private static final int MAX_DISINTEGRATION_SMOKE_ORIGINS = 1024;
-    private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            ResourceLocation.fromNamespaceAndPath(OneKick.MOD_ID, "main"),
-            () -> PROTOCOL,
-            PROTOCOL::equals,
-            PROTOCOL::equals
-    );
-    private static int packetId;
 
     private KickNetwork() {
     }
 
-    public static void register() {
-        CHANNEL.messageBuilder(KickInputPacket.class, packetId++, NetworkDirection.PLAY_TO_SERVER)
-                .encoder(KickInputPacket::encode)
-                .decoder(KickInputPacket::decode)
-                .consumerMainThread(KickNetwork::handleInput)
-                .add();
-        CHANNEL.messageBuilder(ChargeStatePacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
-                .encoder(ChargeStatePacket::encode)
-                .decoder(ChargeStatePacket::decode)
-                .consumerMainThread(KickNetwork::handleChargeState)
-                .add();
-        CHANNEL.messageBuilder(PlayerAnimationPacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
-                .encoder(PlayerAnimationPacket::encode)
-                .decoder(PlayerAnimationPacket::decode)
-                .consumerMainThread(KickNetwork::handlePlayerAnimation)
-                .add();
-        CHANNEL.messageBuilder(KickedEntityPacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
-                .encoder(KickedEntityPacket::encode)
-                .decoder(KickedEntityPacket::decode)
-                .consumerMainThread(KickNetwork::handleKickedEntity)
-                .add();
-        CHANNEL.messageBuilder(
-                        DisintegrationSmokePacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
-                .encoder(DisintegrationSmokePacket::encode)
-                .decoder(DisintegrationSmokePacket::decode)
-                .consumerMainThread(KickNetwork::handleDisintegrationSmoke)
-                .add();
+    public static void register(RegisterPayloadHandlersEvent event) {
+        PayloadRegistrar registrar = event.registrar(PROTOCOL);
+        registrar.playToServer(KickInputPacket.TYPE, KickInputPacket.STREAM_CODEC,
+                KickNetwork::handleInput);
+        registrar.playToClient(ChargeStatePacket.TYPE, ChargeStatePacket.STREAM_CODEC,
+                ClientHandlers::handleChargeState);
+        registrar.playToClient(PlayerAnimationPacket.TYPE, PlayerAnimationPacket.STREAM_CODEC,
+                ClientHandlers::handlePlayerAnimation);
+        registrar.playToClient(KickedEntityPacket.TYPE, KickedEntityPacket.STREAM_CODEC,
+                ClientHandlers::handleKickedEntity);
+        registrar.playToClient(
+                DisintegrationSmokePacket.TYPE,
+                DisintegrationSmokePacket.STREAM_CODEC,
+                ClientHandlers::handleDisintegrationSmoke);
     }
 
     public static void sendInput(boolean pressed) {
-        CHANNEL.sendToServer(new KickInputPacket(pressed));
+        PacketDistributor.sendToServer(new KickInputPacket(pressed));
     }
 
     public static void broadcastChargeState(
             ServerPlayer player, boolean active, float charge, float maximum, int chargeLevel) {
-        CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player),
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                player,
                 new ChargeStatePacket(player.getId(), active, charge, maximum, chargeLevel));
     }
 
@@ -85,24 +64,27 @@ public final class KickNetwork {
             float charge,
             float maximum,
             int chargeLevel) {
-        CHANNEL.send(PacketDistributor.PLAYER.with(() -> receiver),
-                new ChargeStatePacket(chargingPlayer.getId(), active, charge, maximum, chargeLevel));
+        PacketDistributor.sendToPlayer(
+                receiver,
+                new ChargeStatePacket(
+                        chargingPlayer.getId(), active, charge, maximum, chargeLevel));
     }
 
     public static void broadcastPlayerAnimation(ServerPlayer player, byte animation) {
-        CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player),
-                new PlayerAnimationPacket(player.getId(), animation));
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                player, new PlayerAnimationPacket(player.getId(), animation));
     }
 
     public static void sendPlayerAnimation(ServerPlayer receiver, Entity player, byte animation) {
-        CHANNEL.send(PacketDistributor.PLAYER.with(() -> receiver),
-                new PlayerAnimationPacket(player.getId(), animation));
+        PacketDistributor.sendToPlayer(
+                receiver, new PlayerAnimationPacket(player.getId(), animation));
     }
 
     public static void broadcastKickedState(
             LivingEntity entity, boolean active, boolean spin, Vec3 initialVelocity) {
-        CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> entity),
-                KickedEntityPacket.create(entity.getId(), active, spin, initialVelocity));
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                entity, KickedEntityPacket.create(
+                        entity.getId(), active, spin, initialVelocity));
     }
 
     public static void sendKickedState(
@@ -111,7 +93,8 @@ public final class KickNetwork {
             boolean active,
             boolean spin,
             Vec3 initialVelocity) {
-        CHANNEL.send(PacketDistributor.PLAYER.with(() -> receiver),
+        PacketDistributor.sendToPlayer(
+                receiver,
                 KickedEntityPacket.create(entity.getId(), active, spin, initialVelocity));
     }
 
@@ -134,7 +117,7 @@ public final class KickNetwork {
         double range = Math.min(256.0D, 64.0D + smokeOriginExtent(smokeOrigins, center));
         for (ServerPlayer player : level.players()) {
             if (player.distanceToSqr(center) <= range * range) {
-                CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
+                PacketDistributor.sendToPlayer(player, packet);
             }
         }
     }
@@ -154,7 +137,7 @@ public final class KickNetwork {
     }
 
     private static Vec3 smokeOriginCenter(List<BlockPos> origins) {
-        BlockPos first = origins.get(0);
+        BlockPos first = origins.getFirst();
         int minX = first.getX();
         int minY = first.getY();
         int minZ = first.getZ();
@@ -184,78 +167,124 @@ public final class KickNetwork {
         return Math.sqrt(maximumDistanceSquared);
     }
 
-    private static void handleInput(KickInputPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
-        ServerPlayer player = contextSupplier.get().getSender();
-        if (player != null) {
+    private static void handleInput(KickInputPacket packet, IPayloadContext context) {
+        if (context.player() instanceof ServerPlayer player) {
             KickManager.handleInput(player, packet.pressed());
         }
     }
 
-    private static void handleChargeState(
-            ChargeStatePacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
-        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                ClientKickState.updateCharge(packet.entityId(), packet.active(), packet.charge(),
-                        packet.maximum(), packet.chargeLevel()));
+    private static ResourceLocation packetId(String path) {
+        return ResourceLocation.fromNamespaceAndPath(OneKick.MOD_ID, path);
     }
 
-    private static void handlePlayerAnimation(
-            PlayerAnimationPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
-        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                ClientKickState.updatePlayerAnimation(packet.entityId(), packet.animation()));
-    }
-
-    private static void handleKickedEntity(
-            KickedEntityPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
-        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                ClientKickState.updateKickedEntity(
-                        packet.entityId(), packet.active(), packet.spin(), packet.visualSpeed(),
-                        new Vec3(packet.initialX(), packet.initialY(), packet.initialZ())));
-    }
-
-    private static void handleDisintegrationSmoke(
-            DisintegrationSmokePacket packet,
-            Supplier<NetworkEvent.Context> contextSupplier) {
-        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
-                ClientKickState.emitDisintegrationSmoke(
-                        new Vec3(packet.impactX(), packet.impactY(), packet.impactZ()),
-                        new Vec3(packet.directionX(), packet.directionY(), packet.directionZ()),
-                        packet.impactSpeed(), packet.affectedBlocks(), packet.smokeOrigins()));
-    }
-
-    private record KickInputPacket(boolean pressed) {
-        private static void encode(KickInputPacket packet, FriendlyByteBuf buffer) {
-            buffer.writeBoolean(packet.pressed);
+    private static final class ClientHandlers {
+        private ClientHandlers() {
         }
 
-        private static KickInputPacket decode(FriendlyByteBuf buffer) {
+        private static void handleChargeState(
+                ChargeStatePacket packet, IPayloadContext context) {
+            ClientKickState.updateCharge(packet.entityId(), packet.active(), packet.charge(),
+                    packet.maximum(), packet.chargeLevel());
+        }
+
+        private static void handlePlayerAnimation(
+                PlayerAnimationPacket packet, IPayloadContext context) {
+            ClientKickState.updatePlayerAnimation(packet.entityId(), packet.animation());
+        }
+
+        private static void handleKickedEntity(
+                KickedEntityPacket packet, IPayloadContext context) {
+            ClientKickState.updateKickedEntity(
+                    packet.entityId(), packet.active(), packet.spin(), packet.visualSpeed(),
+                    new Vec3(packet.initialX(), packet.initialY(), packet.initialZ()));
+        }
+
+        private static void handleDisintegrationSmoke(
+                DisintegrationSmokePacket packet, IPayloadContext context) {
+            ClientKickState.emitDisintegrationSmoke(
+                    new Vec3(packet.impactX(), packet.impactY(), packet.impactZ()),
+                    new Vec3(packet.directionX(), packet.directionY(), packet.directionZ()),
+                    packet.impactSpeed(), packet.affectedBlocks(), packet.smokeOrigins());
+        }
+    }
+
+    private record KickInputPacket(boolean pressed) implements CustomPacketPayload {
+        private static final Type<KickInputPacket> TYPE =
+                new Type<>(packetId("kick_input"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, KickInputPacket> STREAM_CODEC =
+                StreamCodec.ofMember(KickInputPacket::encode, KickInputPacket::decode);
+
+        private void encode(RegistryFriendlyByteBuf buffer) {
+            buffer.writeBoolean(pressed);
+        }
+
+        private static KickInputPacket decode(RegistryFriendlyByteBuf buffer) {
             return new KickInputPacket(buffer.readBoolean());
+        }
+
+        @Override
+        public Type<KickInputPacket> type() {
+            return TYPE;
         }
     }
 
     private record ChargeStatePacket(
-            int entityId, boolean active, float charge, float maximum, int chargeLevel) {
-        private static void encode(ChargeStatePacket packet, FriendlyByteBuf buffer) {
-            buffer.writeVarInt(packet.entityId);
-            buffer.writeBoolean(packet.active);
-            buffer.writeFloat(packet.charge);
-            buffer.writeFloat(packet.maximum);
-            buffer.writeVarInt(packet.chargeLevel);
+            int entityId,
+            boolean active,
+            float charge,
+            float maximum,
+            int chargeLevel
+    ) implements CustomPacketPayload {
+        private static final Type<ChargeStatePacket> TYPE =
+                new Type<>(packetId("charge_state"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, ChargeStatePacket> STREAM_CODEC =
+                StreamCodec.ofMember(ChargeStatePacket::encode, ChargeStatePacket::decode);
+
+        private void encode(RegistryFriendlyByteBuf buffer) {
+            buffer.writeVarInt(entityId);
+            buffer.writeBoolean(active);
+            buffer.writeFloat(charge);
+            buffer.writeFloat(maximum);
+            buffer.writeVarInt(chargeLevel);
         }
 
-        private static ChargeStatePacket decode(FriendlyByteBuf buffer) {
-            return new ChargeStatePacket(buffer.readVarInt(), buffer.readBoolean(), buffer.readFloat(),
-                    buffer.readFloat(), buffer.readVarInt());
+        private static ChargeStatePacket decode(RegistryFriendlyByteBuf buffer) {
+            return new ChargeStatePacket(
+                    buffer.readVarInt(),
+                    buffer.readBoolean(),
+                    buffer.readFloat(),
+                    buffer.readFloat(),
+                    buffer.readVarInt());
+        }
+
+        @Override
+        public Type<ChargeStatePacket> type() {
+            return TYPE;
         }
     }
 
-    private record PlayerAnimationPacket(int entityId, byte animation) {
-        private static void encode(PlayerAnimationPacket packet, FriendlyByteBuf buffer) {
-            buffer.writeVarInt(packet.entityId);
-            buffer.writeByte(packet.animation);
+    private record PlayerAnimationPacket(
+            int entityId,
+            byte animation
+    ) implements CustomPacketPayload {
+        private static final Type<PlayerAnimationPacket> TYPE =
+                new Type<>(packetId("player_animation"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, PlayerAnimationPacket>
+                STREAM_CODEC = StreamCodec.ofMember(
+                        PlayerAnimationPacket::encode, PlayerAnimationPacket::decode);
+
+        private void encode(RegistryFriendlyByteBuf buffer) {
+            buffer.writeVarInt(entityId);
+            buffer.writeByte(animation);
         }
 
-        private static PlayerAnimationPacket decode(FriendlyByteBuf buffer) {
+        private static PlayerAnimationPacket decode(RegistryFriendlyByteBuf buffer) {
             return new PlayerAnimationPacket(buffer.readVarInt(), buffer.readByte());
+        }
+
+        @Override
+        public Type<PlayerAnimationPacket> type() {
+            return TYPE;
         }
     }
 
@@ -266,7 +295,13 @@ public final class KickNetwork {
             float visualSpeed,
             double initialX,
             double initialY,
-            double initialZ) {
+            double initialZ
+    ) implements CustomPacketPayload {
+        private static final Type<KickedEntityPacket> TYPE =
+                new Type<>(packetId("kicked_entity"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, KickedEntityPacket> STREAM_CODEC =
+                StreamCodec.ofMember(KickedEntityPacket::encode, KickedEntityPacket::decode);
+
         private static KickedEntityPacket create(
                 int entityId, boolean active, boolean spin, Vec3 initialVelocity) {
             return new KickedEntityPacket(
@@ -274,20 +309,30 @@ public final class KickNetwork {
                     initialVelocity.x, initialVelocity.y, initialVelocity.z);
         }
 
-        private static void encode(KickedEntityPacket packet, FriendlyByteBuf buffer) {
-            buffer.writeVarInt(packet.entityId);
-            buffer.writeBoolean(packet.active);
-            buffer.writeBoolean(packet.spin);
-            buffer.writeFloat(packet.visualSpeed);
-            buffer.writeDouble(packet.initialX);
-            buffer.writeDouble(packet.initialY);
-            buffer.writeDouble(packet.initialZ);
+        private void encode(RegistryFriendlyByteBuf buffer) {
+            buffer.writeVarInt(entityId);
+            buffer.writeBoolean(active);
+            buffer.writeBoolean(spin);
+            buffer.writeFloat(visualSpeed);
+            buffer.writeDouble(initialX);
+            buffer.writeDouble(initialY);
+            buffer.writeDouble(initialZ);
         }
 
-        private static KickedEntityPacket decode(FriendlyByteBuf buffer) {
+        private static KickedEntityPacket decode(RegistryFriendlyByteBuf buffer) {
             return new KickedEntityPacket(
-                    buffer.readVarInt(), buffer.readBoolean(), buffer.readBoolean(), buffer.readFloat(),
-                    buffer.readDouble(), buffer.readDouble(), buffer.readDouble());
+                    buffer.readVarInt(),
+                    buffer.readBoolean(),
+                    buffer.readBoolean(),
+                    buffer.readFloat(),
+                    buffer.readDouble(),
+                    buffer.readDouble(),
+                    buffer.readDouble());
+        }
+
+        @Override
+        public Type<KickedEntityPacket> type() {
+            return TYPE;
         }
     }
 
@@ -300,22 +345,28 @@ public final class KickNetwork {
             double directionZ,
             float impactSpeed,
             int affectedBlocks,
-            List<BlockPos> smokeOrigins) {
-        private static void encode(
-                DisintegrationSmokePacket packet, FriendlyByteBuf buffer) {
-            buffer.writeDouble(packet.impactX);
-            buffer.writeDouble(packet.impactY);
-            buffer.writeDouble(packet.impactZ);
-            buffer.writeDouble(packet.directionX);
-            buffer.writeDouble(packet.directionY);
-            buffer.writeDouble(packet.directionZ);
-            buffer.writeFloat(packet.impactSpeed);
-            buffer.writeVarInt(packet.affectedBlocks);
-            buffer.writeVarInt(packet.smokeOrigins.size());
-            packet.smokeOrigins.forEach(buffer::writeBlockPos);
+            List<BlockPos> smokeOrigins
+    ) implements CustomPacketPayload {
+        private static final Type<DisintegrationSmokePacket> TYPE =
+                new Type<>(packetId("disintegration_smoke"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, DisintegrationSmokePacket>
+                STREAM_CODEC = StreamCodec.ofMember(
+                        DisintegrationSmokePacket::encode, DisintegrationSmokePacket::decode);
+
+        private void encode(RegistryFriendlyByteBuf buffer) {
+            buffer.writeDouble(impactX);
+            buffer.writeDouble(impactY);
+            buffer.writeDouble(impactZ);
+            buffer.writeDouble(directionX);
+            buffer.writeDouble(directionY);
+            buffer.writeDouble(directionZ);
+            buffer.writeFloat(impactSpeed);
+            buffer.writeVarInt(affectedBlocks);
+            buffer.writeVarInt(smokeOrigins.size());
+            smokeOrigins.forEach(buffer::writeBlockPos);
         }
 
-        private static DisintegrationSmokePacket decode(FriendlyByteBuf buffer) {
+        private static DisintegrationSmokePacket decode(RegistryFriendlyByteBuf buffer) {
             double impactX = buffer.readDouble();
             double impactY = buffer.readDouble();
             double impactZ = buffer.readDouble();
@@ -326,16 +377,22 @@ public final class KickNetwork {
             int affectedBlocks = buffer.readVarInt();
             int originCount = buffer.readVarInt();
             if (originCount < 0 || originCount > MAX_DISINTEGRATION_SMOKE_ORIGINS) {
-                throw new IllegalArgumentException("Invalid disintegration smoke origin count: "
-                        + originCount);
+                throw new IllegalArgumentException(
+                        "Invalid disintegration smoke origin count: " + originCount);
             }
             List<BlockPos> smokeOrigins = new ArrayList<>(originCount);
             for (int i = 0; i < originCount; i++) {
                 smokeOrigins.add(buffer.readBlockPos());
             }
             return new DisintegrationSmokePacket(
-                    impactX, impactY, impactZ, directionX, directionY, directionZ,
+                    impactX, impactY, impactZ,
+                    directionX, directionY, directionZ,
                     impactSpeed, affectedBlocks, List.copyOf(smokeOrigins));
+        }
+
+        @Override
+        public Type<DisintegrationSmokePacket> type() {
+            return TYPE;
         }
     }
 }

@@ -1,0 +1,21 @@
+{
+  "anvil_cost": 8,
+  "description": {
+    "translate": "enchantment.onekick.kinetic_overload"
+  },
+  "effects": {},
+  "max_cost": {
+    "base": 45,
+    "per_level_above_first": 10
+  },
+  "max_level": 3,
+  "min_cost": {
+    "base": 30,
+    "per_level_above_first": 10
+  },
+  "slots": [
+    "feet"
+  ],
+  "supported_items": "#onekick:enchantable/boots",
+  "weight": 1
+}

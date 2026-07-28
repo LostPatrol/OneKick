@@ -1,0 +1,13 @@
+{
+  "replace": false,
+  "values": [
+    "onekick:reaction",
+    "onekick:aerodynamics",
+    "onekick:disintegration",
+    "onekick:unstable_collision",
+    "onekick:kinetic_overload",
+    "onekick:charge",
+    "onekick:overcharge",
+    "onekick:angular_momentum"
+  ]
+}

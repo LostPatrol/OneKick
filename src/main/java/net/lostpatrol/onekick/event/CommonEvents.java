@@ -6,32 +6,35 @@ import net.lostpatrol.onekick.kick.KickManager;
 import net.lostpatrol.onekick.world.BlockImpactService;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
-import net.minecraftforge.event.entity.living.LivingDeathEvent;
-import net.minecraftforge.event.entity.living.LivingEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.level.ExplosionEvent;
-import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.level.ExplosionEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.neoforge.event.tick.EntityTickEvent;
+import net.neoforged.neoforge.event.tick.PlayerTickEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
-@Mod.EventBusSubscriber(modid = OneKick.MOD_ID)
+@EventBusSubscriber(modid = OneKick.MOD_ID)
 public final class CommonEvents {
     private CommonEvents() {
     }
 
     @SubscribeEvent
-    public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
-        if (event.phase == TickEvent.Phase.END && event.player instanceof ServerPlayer player) {
+    public static void onPlayerTick(PlayerTickEvent.Post event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
             KickManager.tickPlayer(player);
         }
     }
 
     @SubscribeEvent
-    public static void onLivingTick(LivingEvent.LivingTickEvent event) {
-        KickManager.tickLiving(event.getEntity());
+    public static void onLivingTick(EntityTickEvent.Post event) {
+        if (event.getEntity() instanceof LivingEntity living) {
+            KickManager.tickLiving(living);
+        }
     }
 
     @SubscribeEvent
@@ -41,10 +44,8 @@ public final class CommonEvents {
     }
 
     @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase == TickEvent.Phase.END) {
-            BlockImpactService.tick(event.getServer());
-        }
+    public static void onServerTick(ServerTickEvent.Post event) {
+        BlockImpactService.tick(event.getServer());
     }
 
     @SubscribeEvent
