@@ -45,6 +45,38 @@ class KickAnimationTest {
     }
 
     @Test
+    void kineticOverloadReplacesTheChargeCircleWithRapidSmallJitter() {
+        assertEquals(Math.toRadians(1.5D),
+                KickAnimation.kineticOverloadJitterAmplitude(1), 1.0E-9D);
+        assertEquals(Math.toRadians(3.0D),
+                KickAnimation.kineticOverloadJitterAmplitude(5), 1.0E-9D);
+        assertEquals(KickAnimation.chargePose(5, 3.25D),
+                KickAnimation.chargePose(5, 0, 3.25D));
+
+        double[] ready = direction(KickAnimation.READY_POSE);
+        double[] previous = null;
+        int visiblyDifferentSteps = 0;
+        for (int tick = 0; tick < 40; tick++) {
+            KickAnimation.Pose pose = KickAnimation.chargePose(5, 3, tick);
+            double[] current = direction(pose);
+            double angleFromReady = Math.acos(
+                    Math.max(-1.0D, Math.min(1.0D, dot(ready, current))));
+            assertTrue(angleFromReady < Math.toRadians(7.0D));
+            assertNoRoll(pose);
+            if (previous != null) {
+                double step = Math.acos(
+                        Math.max(-1.0D, Math.min(1.0D, dot(previous, current))));
+                if (step > Math.toRadians(1.0D)) {
+                    visiblyDifferentSteps++;
+                }
+            }
+            previous = current;
+        }
+        assertTrue(visiblyDifferentSteps >= 20,
+                "Kinetic Overload charge pose did not jitter on most ticks");
+    }
+
+    @Test
     void chargedKickStartsAtTheReleasePose() {
         KickAnimation.Pose release = KickAnimation.chargePose(5, 12.75D);
         assertEquals(release, KickAnimation.kickPose(release, 0.0F));

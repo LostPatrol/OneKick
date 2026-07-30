@@ -18,6 +18,8 @@ public final class ModParticleTypes {
             PARTICLE_TYPES.register("mach_trail", () -> new SimpleParticleType(false));
     public static final DeferredHolder<ParticleType<?>, SimpleParticleType> DISINTEGRATION_SMOKE =
             PARTICLE_TYPES.register("disintegration_smoke", () -> new SimpleParticleType(false));
+    public static final DeferredHolder<ParticleType<?>, SimpleParticleType> UNSTABLE_EXPLOSION =
+            PARTICLE_TYPES.register("unstable_explosion", () -> new SimpleParticleType(false));
 
     private ModParticleTypes() {
     }

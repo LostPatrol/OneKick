@@ -16,7 +16,6 @@ import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModTags;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.network.protocol.game.ClientboundExplodePacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -27,10 +26,8 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Explosion;
-import net.minecraft.world.level.ExplosionDamageCalculator;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -45,8 +42,6 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 public final class BlockImpactService {
     private static final int MAX_DEBRIS_PER_IMPACT = 64;
     private static final long LOW_ALLOCATION_CAPSULE_SCAN_THRESHOLD = 4096L;
-    private static final ExplosionDamageCalculator EXPLOSION_DAMAGE_CALCULATOR =
-            new ExplosionDamageCalculator();
     private static final List<ScheduledExplosion> SCHEDULED_EXPLOSIONS = new ArrayList<>();
 
     private BlockImpactService() {
@@ -58,6 +53,7 @@ public final class BlockImpactService {
             Vec3 impact,
             Vec3 movement,
             double launchSpeed,
+            float impactDamage,
             KickSnapshot snapshot) {
         KickEnchantments enchantments = snapshot.enchantments();
         boolean hasDisintegration = enchantments.disintegration() > 0;
@@ -74,14 +70,16 @@ public final class BlockImpactService {
                     destructionRadius, false, false);
             triggerBlockDestructionAdvancements(level, snapshot, result);
             scheduleExplosionChain(level, impactedEntity, impact, movement,
-                    launchSpeed, destructionRadius, snapshot, result.affectedBlocks() > 0);
+                    launchSpeed, destructionRadius, impactDamage,
+                    snapshot, result.affectedBlocks() > 0);
             return;
         }
         if (hasExplosion) {
             float power = (float) KickMath.unstableExplosionRadius(
                     launchSpeed, enchantments.unstableCollision());
             ExplosionResult result = explode(
-                    level, impactedEntity, impact, movement, power, hasDisintegration, snapshot);
+                    level, impactedEntity, impact, movement, power,
+                    impactDamage, hasDisintegration, snapshot);
             if (hasDisintegration) {
                 triggerBlockDestructionAdvancements(level, snapshot, result.blockImpact());
                 if (result.exploded() && result.blockImpact().affectedBlocks() > 0) {
@@ -120,7 +118,8 @@ public final class BlockImpactService {
                 Entity excluded = level.getEntity(scheduled.excludedEntityId());
                 ExplosionResult result = explode(
                         level, excluded, scheduled.position(), scheduled.movement(),
-                        scheduled.power(), false, scheduled.snapshot());
+                        scheduled.power(), scheduled.impactDamage(),
+                        false, scheduled.snapshot());
                 if (result.exploded() && scheduled.explosiveDisintegration()) {
                     ModCriteriaTriggers.trigger(
                             level, scheduled.snapshot(),
@@ -141,6 +140,7 @@ public final class BlockImpactService {
             Vec3 movement,
             double launchSpeed,
             double explosionRadius,
+            float impactDamage,
             KickSnapshot snapshot,
             boolean explosiveDisintegration) {
         Vec3 axis = safeDirection(movement);
@@ -155,7 +155,7 @@ public final class BlockImpactService {
             SCHEDULED_EXPLOSIONS.add(new ScheduledExplosion(
                     level.dimension(), now + travelTicks,
                     impact.add(axis.scale(distance)),
-                    movement, power, impactedEntity.getUUID(), snapshot,
+                    movement, power, impactDamage, impactedEntity.getUUID(), snapshot,
                     explosiveDisintegration));
         }
     }
@@ -166,6 +166,7 @@ public final class BlockImpactService {
             Vec3 position,
             Vec3 movement,
             float power,
+            float impactDamage,
             boolean destroyBlocks,
             KickSnapshot snapshot) {
         ServerPlayer attacker = snapshot.attacker(level);
@@ -190,9 +191,10 @@ public final class BlockImpactService {
             return ExplosionResult.CANCELLED;
         }
         damageEntitiesWithoutKnockback(
-                level, excludedEntity, position, power, visualExplosion, damageSource);
+                level, excludedEntity, position, power, impactDamage,
+                visualExplosion, damageSource);
         visualExplosion.finalizeExplosion(false);
-        sendExplosionPacket(level, position, power, visualExplosion);
+        KickNetwork.broadcastUnstableExplosion(level, position, power);
         ModCriteriaTriggers.trigger(
                 level, snapshot, KickAdvancementTrigger.Event.UNSTABLE_EXPLOSION);
         BlockImpactResult blockImpact = destroyBlocks
@@ -206,6 +208,7 @@ public final class BlockImpactService {
             @Nullable Entity excludedEntity,
             Vec3 position,
             float power,
+            float impactDamage,
             Explosion explosion,
             DamageSource damageSource) {
         level.gameEvent(excludedEntity, GameEvent.EXPLODE, position);
@@ -222,40 +225,12 @@ public final class BlockImpactService {
         EventHooks.onExplosionDetonate(level, explosion, entities, diameter);
 
         for (Entity entity : entities) {
-            if (entity instanceof ItemEntity || entity.ignoreExplosion(explosion)) {
+            if (entity instanceof ItemEntity || entity.ignoreExplosion(explosion)
+                    || entity.distanceToSqr(position) > diameter * diameter) {
                 continue;
             }
-            double distanceRatio = Math.sqrt(entity.distanceToSqr(position)) / diameter;
-            if (distanceRatio > 1.0D) {
-                continue;
-            }
-            double directionX = entity.getX() - position.x;
-            double directionY = (entity instanceof PrimedTnt ? entity.getY() : entity.getEyeY())
-                    - position.y;
-            double directionZ = entity.getZ() - position.z;
-            if (directionX * directionX + directionY * directionY + directionZ * directionZ
-                    <= 1.0E-12D) {
-                continue;
-            }
-            entity.hurt(
-                    damageSource,
-                    EXPLOSION_DAMAGE_CALCULATOR.getEntityDamageAmount(explosion, entity));
-        }
-    }
-
-    private static void sendExplosionPacket(
-            ServerLevel level, Vec3 position, float power, Explosion explosion) {
-        explosion.clearToBlow();
-        for (ServerPlayer player : level.players()) {
-            if (player.distanceToSqr(position.x, position.y, position.z) < 4096.0D) {
-                player.connection.send(new ClientboundExplodePacket(
-                        position.x, position.y, position.z, power,
-                        explosion.getToBlow(),
-                        null,
-                        Explosion.BlockInteraction.DESTROY_WITH_DECAY,
-                        ParticleTypes.EXPLOSION,
-                        ParticleTypes.EXPLOSION_EMITTER,
-                        SoundEvents.GENERIC_EXPLODE));
+            if (impactDamage > 0.0F) {
+                entity.hurt(damageSource, impactDamage);
             }
         }
     }
@@ -562,6 +537,7 @@ public final class BlockImpactService {
             Vec3 position,
             Vec3 movement,
             float power,
+            float impactDamage,
             UUID excludedEntityId,
             KickSnapshot snapshot,
             boolean explosiveDisintegration) {

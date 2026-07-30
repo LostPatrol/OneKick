@@ -22,6 +22,8 @@ import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
@@ -37,6 +39,8 @@ public final class ClientKickState {
     private static final int MACH_RING_MIN_LAYERS = 2;
     private static final int MACH_RING_MAX_LAYERS = 6;
     private static final int MACH_RING_MAX_PREDICTION_TICKS = 512;
+    private static final int CHARGE_SMOKE_PULSE_TICKS = 18;
+    private static final int UNSTABLE_EXPLOSION_LIFETIME_TICKS = 8;
     private static final ResourceLocation JUMP_BAR_BACKGROUND_SPRITE =
             ResourceLocation.withDefaultNamespace("hud/jump_bar_background");
     private static final ResourceLocation JUMP_BAR_PROGRESS_SPRITE =
@@ -44,6 +48,7 @@ public final class ClientKickState {
     private static final Map<Integer, PlayerAnimation> PLAYER_ANIMATIONS = new HashMap<>();
     private static final Map<Integer, ChargeVisual> CHARGING_PLAYERS = new HashMap<>();
     private static final Map<Integer, KickedVisual> KICKED_ENTITIES = new HashMap<>();
+    private static final List<UnstableExplosionVisual> UNSTABLE_EXPLOSIONS = new ArrayList<>();
     private static boolean charging;
     private static float charge;
     private static float chargeMaximum;
@@ -52,18 +57,25 @@ public final class ClientKickState {
     }
 
     public static void updateCharge(
-            int entityId, boolean active, float value, float maximum, int chargeLevel) {
+            int entityId,
+            boolean active,
+            float value,
+            float maximum,
+            int chargeLevel,
+            int kineticOverloadLevel) {
         if (active) {
             CHARGING_PLAYERS.compute(entityId, (ignored, visual) -> {
                 if (visual == null) {
-                    return new ChargeVisual(value, maximum, chargeLevel);
+                    return new ChargeVisual(
+                            value, maximum, chargeLevel, kineticOverloadLevel);
                 }
-                visual.update(value, maximum, chargeLevel);
+                visual.update(value, maximum, chargeLevel, kineticOverloadLevel);
                 return visual;
             });
             PlayerAnimation animation = PLAYER_ANIMATIONS.get(entityId);
             if (animation != null && animation.animation() == KickNetwork.ANIMATION_CHARGE) {
-                PLAYER_ANIMATIONS.put(entityId, animation.withChargeLevel(chargeLevel));
+                PLAYER_ANIMATIONS.put(entityId,
+                        animation.withChargeState(chargeLevel, kineticOverloadLevel));
             }
         } else {
             CHARGING_PLAYERS.remove(entityId);
@@ -87,14 +99,19 @@ public final class ClientKickState {
                 && previous != null
                 && previous.animation() == KickNetwork.ANIMATION_CHARGE;
         KickAnimation.Pose startPose = startedFromCharge
-                ? KickAnimation.chargePose(previous.chargeLevel(), startedAt)
+                ? KickAnimation.chargePose(
+                        previous.chargeLevel(), previous.kineticOverloadLevel(), startedAt)
                 : KickAnimation.READY_POSE;
         ChargeVisual visual = CHARGING_PLAYERS.get(entityId);
         int chargeLevel = animation == KickNetwork.ANIMATION_CHARGE && visual != null
                 ? Mth.clamp(visual.level, 1, 5)
                 : 1;
+        int kineticOverloadLevel = animation == KickNetwork.ANIMATION_CHARGE && visual != null
+                ? Math.max(0, visual.kineticOverloadLevel)
+                : 0;
         PLAYER_ANIMATIONS.put(entityId,
-                new PlayerAnimation(animation, startedAt, chargeLevel, startPose));
+                new PlayerAnimation(
+                        animation, startedAt, chargeLevel, kineticOverloadLevel, startPose));
     }
 
     public static void updateKickedEntity(
@@ -126,7 +143,8 @@ public final class ClientKickState {
         }
         first = first.normalize();
         Vec3 second = axis.cross(first).normalize();
-        int count = KickMath.disintegrationSmokeParticleCount(affectedBlocks, impactSpeed);
+        int count = KickMath.disintegrationSmokeParticleCount(
+                affectedBlocks, smokeOrigins.size(), impactSpeed);
         for (int i = 0; i < count; i++) {
             int originIndex = count == 1
                     ? smokeOrigins.size() / 2
@@ -162,11 +180,26 @@ public final class ClientKickState {
         }
     }
 
+    public static void emitUnstableExplosion(Vec3 center, double radius) {
+        ClientLevel level = Minecraft.getInstance().level;
+        if (level == null) {
+            return;
+        }
+        level.playLocalSound(
+                center.x, center.y, center.z,
+                SoundEvents.GENERIC_EXPLODE.value(), SoundSource.BLOCKS, 4.0F,
+                (1.0F + (level.random.nextFloat() - level.random.nextFloat()) * 0.2F) * 0.7F,
+                false);
+        UNSTABLE_EXPLOSIONS.add(new UnstableExplosionVisual(
+                center, KickMath.unstableExplosionVisualScale(radius)));
+    }
+
     public static void tickParticles(Minecraft minecraft) {
         ClientLevel level = minecraft.level;
         if (level == null) {
             return;
         }
+        tickUnstableExplosions(level);
 
         Iterator<Map.Entry<Integer, ChargeVisual>> chargeIterator = CHARGING_PLAYERS.entrySet().iterator();
         while (chargeIterator.hasNext()) {
@@ -219,7 +252,11 @@ public final class ClientKickState {
             int chargeLevel = visual == null
                     ? animation.chargeLevel()
                     : Mth.clamp(visual.level, 1, 5);
-            applyPose(rightLeg, KickAnimation.chargePose(chargeLevel, gameTime() + partialTick));
+            int kineticOverloadLevel = visual == null
+                    ? animation.kineticOverloadLevel()
+                    : Math.max(0, visual.kineticOverloadLevel);
+            applyPose(rightLeg, KickAnimation.chargePose(
+                    chargeLevel, kineticOverloadLevel, gameTime() + partialTick));
         } else {
             return false;
         }
@@ -290,6 +327,7 @@ public final class ClientKickState {
         PLAYER_ANIMATIONS.clear();
         CHARGING_PLAYERS.clear();
         KICKED_ENTITIES.clear();
+        UNSTABLE_EXPLOSIONS.clear();
         charging = false;
         charge = 0.0F;
         chargeMaximum = 0.0F;
@@ -304,10 +342,84 @@ public final class ClientKickState {
         }
     }
 
+    private static void tickUnstableExplosions(ClientLevel level) {
+        Iterator<UnstableExplosionVisual> iterator = UNSTABLE_EXPLOSIONS.iterator();
+        while (iterator.hasNext()) {
+            UnstableExplosionVisual visual = iterator.next();
+            double spread = 4.0D * visual.scale;
+            double animationProgress =
+                    (double) visual.age / UNSTABLE_EXPLOSION_LIFETIME_TICKS;
+            for (int i = 0; i < 6; i++) {
+                double x = visual.center.x
+                        + (level.random.nextDouble() - level.random.nextDouble()) * spread;
+                double y = visual.center.y
+                        + (level.random.nextDouble() - level.random.nextDouble()) * spread;
+                double z = visual.center.z
+                        + (level.random.nextDouble() - level.random.nextDouble()) * spread;
+                level.addAlwaysVisibleParticle(
+                        ModParticleTypes.UNSTABLE_EXPLOSION.get(), true,
+                        x, y, z, animationProgress, visual.scale, 0.0D);
+            }
+            visual.age++;
+            if (visual.age >= UNSTABLE_EXPLOSION_LIFETIME_TICKS) {
+                iterator.remove();
+            }
+        }
+    }
+
     private static void emitChargeParticles(ClientLevel level, Player player, ChargeVisual visual) {
         if (visual.maximum <= 0.0F) {
             return;
         }
+        emitBaseChargeSmoke(level, player, visual);
+        if (visual.kineticOverloadLevel > 0) {
+            emitKineticOverloadChargeParticles(level, player, visual);
+        }
+    }
+
+    private static void emitBaseChargeSmoke(
+            ClientLevel level, Player player, ChargeVisual visual) {
+        int enchantmentLevel = Mth.clamp(visual.level, 1, 5);
+        double chargeProgress = Mth.clamp(visual.charge / visual.maximum, 0.0F, 1.0F);
+        long elapsed = Math.max(0L, level.getGameTime() - visual.startedAt);
+        double pulseProgress = (elapsed % CHARGE_SMOKE_PULSE_TICKS + 0.5D)
+                / CHARGE_SMOKE_PULSE_TICKS;
+        double pulseEnvelope = Math.sin(Math.PI * pulseProgress);
+        double maximumRadius = chargeSmokeMaximumRadius(enchantmentLevel)
+                * (0.72D + chargeProgress * 0.28D);
+        double radius = maximumRadius * (0.42D + pulseProgress * 0.58D);
+        int count = 1 + enchantmentLevel / 2
+                + (int) Math.floor(pulseEnvelope * (enchantmentLevel + 1))
+                + (int) Math.floor(chargeProgress * enchantmentLevel * 0.6D);
+        if (chargeProgress >= 0.999D) {
+            count += 2;
+        }
+
+        RandomSource random = player.getRandom();
+        Vec3 center = player.position().add(0.0D, player.getBbHeight() * 0.55D, 0.0D);
+        double spriteProgress = Mth.clamp(
+                0.92D - enchantmentLevel * 0.13D - pulseEnvelope * 0.18D,
+                0.0D, 1.0D);
+        for (int i = 0; i < count; i++) {
+            double vertical = random.nextDouble() * 2.0D - 1.0D;
+            double horizontal = Math.sqrt(Math.max(0.0D, 1.0D - vertical * vertical));
+            double angle = random.nextDouble() * Mth.TWO_PI;
+            Vec3 point = center.add(
+                    Math.cos(angle) * horizontal * radius,
+                    vertical * radius,
+                    Math.sin(angle) * horizontal * radius);
+            level.addAlwaysVisibleParticle(
+                    ParticleTypes.EXPLOSION, true,
+                    point.x, point.y, point.z, spriteProgress, 0.0D, 0.0D);
+        }
+    }
+
+    static double chargeSmokeMaximumRadius(int chargeLevel) {
+        return 0.8D + Mth.clamp(chargeLevel, 1, 5) * 0.32D;
+    }
+
+    private static void emitKineticOverloadChargeParticles(
+            ClientLevel level, Player player, ChargeVisual visual) {
         double progress = Mth.clamp(visual.charge / visual.maximum, 0.0F, 1.0F);
         boolean full = progress >= 0.999D;
         int enchantmentLevel = Mth.clamp(visual.level, 1, 5);
@@ -772,24 +884,30 @@ public final class ClientKickState {
             byte animation,
             long startedAt,
             int chargeLevel,
+            int kineticOverloadLevel,
             KickAnimation.Pose startPose) {
-        private PlayerAnimation withChargeLevel(int level) {
+        private PlayerAnimation withChargeState(int level, int overloadLevel) {
             return new PlayerAnimation(
-                    animation, startedAt, Mth.clamp(level, 1, 5), startPose);
+                    animation, startedAt, Mth.clamp(level, 1, 5),
+                    Math.max(0, overloadLevel), startPose);
         }
     }
 
     private static final class ChargeVisual {
+        private final long startedAt = gameTime();
         private float charge;
         private float maximum;
         private int level;
+        private int kineticOverloadLevel;
         private boolean completionBurstPending;
 
-        private ChargeVisual(float charge, float maximum, int level) {
-            update(charge, maximum, level);
+        private ChargeVisual(
+                float charge, float maximum, int level, int kineticOverloadLevel) {
+            update(charge, maximum, level, kineticOverloadLevel);
         }
 
-        private void update(float value, float maximum, int level) {
+        private void update(
+                float value, float maximum, int level, int kineticOverloadLevel) {
             float safeMaximum = Math.max(0.0F, maximum);
             float safeValue = Math.max(0.0F, value);
             boolean wasFull = this.maximum > 0.0F
@@ -802,6 +920,18 @@ public final class ClientKickState {
             this.charge = safeValue;
             this.maximum = safeMaximum;
             this.level = Math.max(0, level);
+            this.kineticOverloadLevel = Math.max(0, kineticOverloadLevel);
+        }
+    }
+
+    private static final class UnstableExplosionVisual {
+        private final Vec3 center;
+        private final double scale;
+        private int age;
+
+        private UnstableExplosionVisual(Vec3 center, double scale) {
+            this.center = center;
+            this.scale = scale;
         }
     }
 
