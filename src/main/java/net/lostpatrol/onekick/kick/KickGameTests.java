@@ -11,6 +11,7 @@ import net.lostpatrol.onekick.config.OneKickConfig;
 import net.lostpatrol.onekick.world.BlockImpactService;
 import net.minecraft.advancements.Advancement;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceLocation;
@@ -36,21 +37,28 @@ public final class KickGameTests {
     }
 
     @GameTest(template = "flight_room", timeoutTicks = 20)
-    public static void controlledMobFlightChangesPositionWithoutDirectDamage(GameTestHelper helper) {
+    public static void unchargedHorizontalKickMovesTargetWithoutDirectDamage(
+            GameTestHelper helper) {
+        for (int x = 1; x <= 14; x++) {
+            for (int z = 1; z <= 3; z++) {
+                helper.setBlock(x, 2, z, Blocks.STONE);
+            }
+        }
         Villager villager = helper.spawn(EntityType.VILLAGER, 2, 3, 2);
         Vec3 start = villager.position();
         float startingHealth = villager.getHealth();
+        double launchSpeed = KickMath.launchSpeed(KickMath.BASE_SPEED, villager);
+        Vec3 velocity = KickMath.launchDirection(new Vec3(1.0D, 0.0D, 0.0D))
+                .scale(launchSpeed);
         KickSnapshot snapshot = new KickSnapshot(
                 UUID.randomUUID(), 1.0D, KickEnchantments.from(ItemStack.EMPTY), ItemStack.EMPTY);
-        KickManager.startKickedMotion(villager, snapshot, new Vec3(1.0D, 0.3D, 0.0D), false);
+        KickManager.startKickedMotion(villager, snapshot, velocity, false);
 
-        helper.runAtTickTime(5, () -> {
-            helper.assertTrue(villager.getX() > start.x + 3.0D,
-                    "No-AI kicked mob did not receive server-controlled displacement");
-            helper.assertTrue(villager.getY() > start.y,
-                    "Kicked mob did not follow the expected rising ballistic arc");
+        helper.runAtTickTime(10, () -> {
+            helper.assertTrue(villager.getX() > start.x + 6.0D,
+                    "Uncharged horizontal kick did not displace the target");
             helper.assertTrue(villager.getHealth() == startingHealth,
-                    "The kick itself changed the target's health");
+                    "Uncharged horizontal kick directly damaged the target");
             helper.succeed();
         });
     }
@@ -82,6 +90,84 @@ public final class KickGameTests {
                 helper.getLevel(), villager, new Vec3(1.0D, 0.0D, 0.0D));
         helper.assertTrue(impact == null,
                 "Horizontal sweep treated the supporting floor as a wall impact");
+        helper.succeed();
+    }
+
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void lowBallisticSweepIgnoresFlatFloorAtEverySubBlockOffset(
+            GameTestHelper helper) {
+        for (int x = 1; x <= 10; x++) {
+            for (int z = 1; z <= 3; z++) {
+                helper.setBlock(x, 2, z, Blocks.STONE);
+            }
+        }
+        Villager villager = helper.spawn(EntityType.VILLAGER, 2, 3, 2);
+        double launchSpeed = KickMath.launchSpeed(KickMath.BASE_SPEED, villager);
+        Vec3 movement = KickMath.launchDirection(new Vec3(1.0D, 0.0D, 0.0D))
+                .scale(launchSpeed);
+        for (int tick = 0; tick < 5; tick++) {
+            movement = KickMath.nextBallisticVelocity(movement, false);
+        }
+
+        for (int step = 0; step < 128; step++) {
+            double x = 2.0D + step / 128.0D;
+            villager.setPos(helper.absoluteVec(new Vec3(x, 3.0D, 2.5D)));
+            KickManager.FirstBlockImpact impact = KickManager.findFirstBlockImpact(
+                    helper.getLevel(), villager, movement);
+            helper.assertTrue(impact == null,
+                    "Low ballistic sweep treated flat floor as a wall at x="
+                            + x + ", movement=" + movement + ", impact=" + impact);
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void nearHorizontalUnchargedKickDoesNotHitSupportingFloor(
+            GameTestHelper helper) {
+        for (int x = 1; x <= 5; x++) {
+            for (int z = 1; z <= 3; z++) {
+                helper.setBlock(x, 2, z, Blocks.DIRT_PATH);
+            }
+        }
+        Villager villager = helper.spawn(EntityType.VILLAGER, 2, 3, 2);
+        villager.setPos(helper.absoluteVec(new Vec3(2.0D, 2.9375D, 2.5D)));
+        Vec3 start = villager.position();
+        float startingHealth = villager.getHealth();
+        double launchSpeed = KickMath.launchSpeed(KickMath.BASE_SPEED, villager);
+        Vec3 velocity = KickMath.launchDirection(new Vec3(1.0D, -0.15D, 0.0D))
+                .scale(launchSpeed);
+        helper.assertTrue(velocity.y < 0.0D
+                        && Math.abs(velocity.y) < 0.35D,
+                "Regression setup did not produce a shallow downward launch");
+
+        KickSnapshot snapshot = new KickSnapshot(
+                UUID.randomUUID(), KickMath.BASE_SPEED,
+                KickEnchantments.from(ItemStack.EMPTY), ItemStack.EMPTY);
+        KickManager.startKickedMotion(villager, snapshot, velocity, false);
+        KickManager.tickLiving(villager);
+
+        helper.assertTrue(villager.getX() > start.x + 0.5D,
+                "Shallow horizontal kick stopped against its supporting floor");
+        helper.assertTrue(villager.getHealth() == startingHealth,
+                "Shallow horizontal kick treated its supporting floor as a damaging wall");
+        helper.succeed();
+    }
+
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void highSpeedDownwardSweepStillDetectsFloor(GameTestHelper helper) {
+        for (int x = 1; x <= 5; x++) {
+            for (int z = 1; z <= 3; z++) {
+                helper.setBlock(x, 2, z, Blocks.STONE);
+            }
+        }
+        Villager villager = helper.spawn(EntityType.VILLAGER, 2, 4, 2);
+        KickManager.FirstBlockImpact impact = KickManager.findFirstBlockImpact(
+                helper.getLevel(), villager, new Vec3(0.2D, -2.0D, 0.0D));
+
+        helper.assertTrue(impact != null,
+                "High-speed downward sweep did not detect the floor");
+        helper.assertTrue(impact.face().getAxis() == Direction.Axis.Y,
+                "High-speed downward sweep did not resolve to the floor surface: " + impact);
         helper.succeed();
     }
 

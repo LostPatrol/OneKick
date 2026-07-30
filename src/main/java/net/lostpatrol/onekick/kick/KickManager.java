@@ -40,6 +40,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 public final class KickManager {
     private static final double BLOCK_SWEEP_EPSILON = 1.0E-6D;
+    private static final double SUPPORT_SURFACE_EPSILON = 1.0E-5D;
     private static final double MIN_VERTICAL_BLOCK_IMPACT_SPEED = 0.35D;
     private static final Map<UUID, PlayerKickState> PLAYER_STATES = new HashMap<>();
     private static final Map<UUID, KickedMotionState> KICKED_ENTITIES = new HashMap<>();
@@ -586,6 +587,10 @@ public final class KickManager {
 
         for (VoxelShape collisionShape : level.getBlockCollisions(entity, sweptBounds)) {
             for (AABB obstacle : collisionShape.toAabbs()) {
+                if (Math.abs(movement.y) <= MIN_VERTICAL_BLOCK_IMPACT_SPEED
+                        && obstacle.maxY <= bounds.minY + SUPPORT_SURFACE_EPSILON) {
+                    continue;
+                }
                 AABB expandedObstacle = obstacle.inflate(halfX, halfY, halfZ);
                 SweptBoxHit sweptHit = sweepPointAgainstBox(
                         startCenter, movement, expandedObstacle);

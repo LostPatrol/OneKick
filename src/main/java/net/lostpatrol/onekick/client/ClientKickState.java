@@ -532,16 +532,43 @@ public final class ClientKickState {
     private static void prepareMachRings(
             LivingEntity entity, Vec3 start, KickedVisual visual) {
         visual.machRingsPrepared = true;
-        Vec3 velocity = visual.initialVelocity;
-        if (velocity.lengthSqr() <= 1.0E-6D) {
-            return;
-        }
         int ringCount = KickMath.machRingCount(visual.visualSpeed);
         double ringInterval = KickMath.machRingInterval(visual.visualSpeed);
         double baseRadius = Math.max(1.05D,
                 entity.getBbWidth() * 0.75D + entity.getBbHeight() * 0.2D)
                 * MACH_RING_RADIUS_MULTIPLIER;
-        boolean submerged = entity.isInWater();
+        List<PredictedMachRing> predictedRings = predictMachRings(
+                start, visual.initialVelocity, entity.isInWater(), ringCount, ringInterval);
+        for (int ringIndex = 0; ringIndex < predictedRings.size(); ringIndex++) {
+            PredictedMachRing predicted = predictedRings.get(ringIndex);
+            double radius = baseRadius
+                    * KickMath.machRingRadiusScale(ringIndex, visual.visualSpeed);
+            long arrivalTime = visual.startedAt
+                    + Math.max(0L, Math.round(predicted.arrivalTick));
+            visual.machRings.add(new MachRing(
+                    predicted.center,
+                    predicted.direction,
+                    radius,
+                    arrivalTime,
+                    predicted.trailPath));
+        }
+    }
+
+    static List<PredictedMachRing> predictMachRings(
+            Vec3 start,
+            Vec3 initialVelocity,
+            boolean submerged,
+            int ringCount,
+            double ringInterval) {
+        if (initialVelocity.lengthSqr() <= 1.0E-6D
+                || ringCount <= 0
+                || ringInterval <= 0.0D) {
+            return List.of();
+        }
+        List<PredictedMachRing> rings = new ArrayList<>(ringCount);
+        List<Vec3> trailPath = new ArrayList<>();
+        trailPath.add(start);
+        Vec3 velocity = initialVelocity;
         Vec3 position = start;
         double travelled = 0.0D;
         int ringIndex = 0;
@@ -560,20 +587,26 @@ public final class ClientKickState {
                             (targetDistance - travelled) / segmentLength, 0.0D, 1.0D);
                     Vec3 direction = velocity.normalize();
                     Vec3 center = position.add(velocity.scale(progress));
-                    double radius = baseRadius
-                            * KickMath.machRingRadiusScale(ringIndex, visual.visualSpeed);
-                    long arrivalTime = visual.startedAt + Math.max(0L, Math.round(tick + progress));
-                    double trailLength = ringIndex == 0
-                            ? MACH_RING_START_DISTANCE
-                            : ringInterval;
-                    visual.machRings.add(new MachRing(
-                            center, direction, radius, arrivalTime, trailLength));
+                    appendTrailPoint(trailPath, center);
+                    rings.add(new PredictedMachRing(
+                            center, direction, tick + progress, List.copyOf(trailPath)));
+                    trailPath.clear();
+                    trailPath.add(center);
                     ringIndex++;
                 }
                 position = position.add(velocity);
+                appendTrailPoint(trailPath, position);
                 travelled = segmentEnd;
             }
             velocity = KickMath.nextBallisticVelocity(velocity, submerged);
+        }
+        return List.copyOf(rings);
+    }
+
+    private static void appendTrailPoint(List<Vec3> trailPath, Vec3 point) {
+        Vec3 previous = trailPath.get(trailPath.size() - 1);
+        if (previous.distanceToSqr(point) > 1.0E-12D) {
+            trailPath.add(point);
         }
     }
 
@@ -586,8 +619,7 @@ public final class ClientKickState {
             }
             emitMachRing(level, ring.center, ring.direction, ring.radius,
                     KickMath.machRingLifetimeTicks(visual.visualSpeed));
-            emitMachTrail(level, ring.center, ring.direction,
-                    ring.trailLength, visual.visualSpeed);
+            emitMachTrail(level, ring.trailPath, visual.visualSpeed);
             visual.nextMachRing++;
         }
     }
@@ -649,26 +681,62 @@ public final class ClientKickState {
 
     private static void emitMachTrail(
             ClientLevel level,
-            Vec3 center,
-            Vec3 direction,
-            double trailLength,
+            List<Vec3> trailPath,
             double launchSpeed) {
-        Vec3 first = direction.cross(new Vec3(0.0D, 1.0D, 0.0D));
-        if (first.lengthSqr() < 1.0E-4D) {
-            first = direction.cross(new Vec3(1.0D, 0.0D, 0.0D));
+        double trailLength = machTrailLength(trailPath);
+        if (trailLength <= 1.0E-6D) {
+            return;
         }
-        first = first.normalize();
-        Vec3 second = direction.cross(first).normalize();
         int lifetimeTicks = KickMath.machTrailLifetimeTicks(launchSpeed);
-        int particles = Math.max(10, Mth.ceil(trailLength * 2.5D));
-        for (int i = 0; i < particles; i++) {
-            double along = trailLength * (i + level.random.nextDouble()) / particles;
-            Vec3 jitter = first.scale(level.random.nextGaussian() * 0.035D)
-                    .add(second.scale(level.random.nextGaussian() * 0.035D));
-            Vec3 point = center.subtract(direction.scale(along)).add(jitter);
+        int intervals = Math.max(10, Mth.ceil(trailLength * 2.5D));
+        for (int i = 0; i <= intervals; i++) {
+            MachTrailSample sample = sampleMachTrail(
+                    trailPath, trailLength * i / intervals);
+            Vec3 first = sample.direction.cross(new Vec3(0.0D, 1.0D, 0.0D));
+            if (first.lengthSqr() < 1.0E-4D) {
+                first = sample.direction.cross(new Vec3(1.0D, 0.0D, 0.0D));
+            }
+            first = first.normalize();
+            Vec3 second = sample.direction.cross(first).normalize();
+            double jitterScale = i == 0 || i == intervals ? 0.0D : 0.035D;
+            Vec3 jitter = first.scale(level.random.nextGaussian() * jitterScale)
+                    .add(second.scale(level.random.nextGaussian() * jitterScale));
+            Vec3 point = sample.point.add(jitter);
             level.addAlwaysVisibleParticle(ModParticleTypes.MACH_TRAIL.get(), true,
                     point.x, point.y, point.z, lifetimeTicks, 0.0D, 0.0D);
         }
+    }
+
+    static double machTrailLength(List<Vec3> trailPath) {
+        double length = 0.0D;
+        for (int i = 1; i < trailPath.size(); i++) {
+            length += trailPath.get(i).distanceTo(trailPath.get(i - 1));
+        }
+        return length;
+    }
+
+    static MachTrailSample sampleMachTrail(List<Vec3> trailPath, double distance) {
+        if (trailPath.isEmpty()) {
+            throw new IllegalArgumentException("Mach trail path must not be empty");
+        }
+        double remaining = Math.max(0.0D, distance);
+        Vec3 direction = new Vec3(0.0D, 0.0D, 1.0D);
+        for (int i = 1; i < trailPath.size(); i++) {
+            Vec3 start = trailPath.get(i - 1);
+            Vec3 delta = trailPath.get(i).subtract(start);
+            double length = delta.length();
+            if (length <= 1.0E-9D) {
+                continue;
+            }
+            direction = delta.scale(1.0D / length);
+            if (remaining <= length || i == trailPath.size() - 1) {
+                return new MachTrailSample(
+                        start.add(delta.scale(Mth.clamp(remaining / length, 0.0D, 1.0D))),
+                        direction);
+            }
+            remaining -= length;
+        }
+        return new MachTrailSample(trailPath.get(trailPath.size() - 1), direction);
     }
 
     private static void applyPose(ModelPart part, KickAnimation.Pose pose) {
@@ -761,6 +829,20 @@ public final class ClientKickState {
     }
 
     private record MachRing(
-            Vec3 center, Vec3 direction, double radius, long arrivalTime, double trailLength) {
+            Vec3 center,
+            Vec3 direction,
+            double radius,
+            long arrivalTime,
+            List<Vec3> trailPath) {
+    }
+
+    record PredictedMachRing(
+            Vec3 center,
+            Vec3 direction,
+            double arrivalTick,
+            List<Vec3> trailPath) {
+    }
+
+    record MachTrailSample(Vec3 point, Vec3 direction) {
     }
 }
