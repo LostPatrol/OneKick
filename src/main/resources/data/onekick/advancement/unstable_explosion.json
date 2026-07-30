@@ -2,7 +2,7 @@
   "parent": "onekick:charged_kick",
   "display": {
     "icon": {
-      "item": "minecraft:tnt"
+      "id": "minecraft:tnt"
     },
     "title": {
       "translate": "advancements.onekick.unstable_explosion.title"

@@ -2,7 +2,7 @@
   "parent": "onekick:root",
   "display": {
     "icon": {
-      "item": "minecraft:iron_boots"
+      "id": "minecraft:iron_boots"
     },
     "title": {
       "translate": "advancements.onekick.charged_kick.title"

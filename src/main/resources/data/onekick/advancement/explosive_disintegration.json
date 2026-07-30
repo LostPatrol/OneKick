@@ -2,7 +2,7 @@
   "parent": "onekick:unstable_explosion",
   "display": {
     "icon": {
-      "item": "minecraft:fire_charge"
+      "id": "minecraft:fire_charge"
     },
     "title": {
       "translate": "advancements.onekick.explosive_disintegration.title"

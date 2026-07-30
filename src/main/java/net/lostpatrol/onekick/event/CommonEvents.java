@@ -12,7 +12,6 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
-import net.neoforged.neoforge.event.level.ExplosionEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
@@ -31,16 +30,10 @@ public final class CommonEvents {
     }
 
     @SubscribeEvent
-    public static void onLivingTick(EntityTickEvent.Post event) {
+    public static void onLivingTick(EntityTickEvent.Pre event) {
         if (event.getEntity() instanceof LivingEntity living) {
             KickManager.tickLiving(living);
         }
-    }
-
-    @SubscribeEvent
-    public static void onExplosionDetonate(ExplosionEvent.Detonate event) {
-        BlockImpactService.excludeItemEntitiesFromUnstableCollisionExplosion(
-                event.getExplosion(), event.getAffectedEntities());
     }
 
     @SubscribeEvent

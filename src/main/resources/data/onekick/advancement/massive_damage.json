@@ -2,7 +2,7 @@
   "parent": "onekick:mach_launch",
   "display": {
     "icon": {
-      "item": "minecraft:netherite_boots"
+      "id": "minecraft:netherite_boots"
     },
     "title": {
       "translate": "advancements.onekick.massive_damage.title"

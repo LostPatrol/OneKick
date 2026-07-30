@@ -2,7 +2,7 @@
   "parent": "onekick:root",
   "display": {
     "icon": {
-      "item": "minecraft:feather"
+      "id": "minecraft:feather"
     },
     "title": {
       "translate": "advancements.onekick.aerodynamic_air_kick.title"

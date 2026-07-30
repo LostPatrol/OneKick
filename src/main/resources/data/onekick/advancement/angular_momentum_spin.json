@@ -2,7 +2,7 @@
   "parent": "onekick:root",
   "display": {
     "icon": {
-      "item": "minecraft:compass"
+      "id": "minecraft:compass"
     },
     "title": {
       "translate": "advancements.onekick.angular_momentum_spin.title"

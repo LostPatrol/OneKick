@@ -134,6 +134,8 @@ public final class ClientEvents {
                 ClientKickState.renderChargeHud(event.getGuiGraphics(),
                         event.getGuiGraphics().guiWidth(), event.getGuiGraphics().guiHeight());
                 event.setCanceled(true);
+            } else if (event.getName().equals(VanillaGuiLayers.EXPERIENCE_LEVEL)) {
+                event.setCanceled(true);
             }
         }
 

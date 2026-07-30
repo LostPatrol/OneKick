@@ -2,7 +2,7 @@
   "parent": "onekick:charged_kick",
   "display": {
     "icon": {
-      "item": "minecraft:creeper_spawn_egg"
+      "id": "minecraft:creeper_spawn_egg"
     },
     "title": {
       "translate": "advancements.onekick.maximum_charge.title"

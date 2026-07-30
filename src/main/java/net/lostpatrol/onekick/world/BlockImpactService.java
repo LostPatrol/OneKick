@@ -1,12 +1,9 @@
 package net.lostpatrol.onekick.world;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import javax.annotation.Nullable;
 import net.lostpatrol.onekick.advancement.KickAdvancementTrigger;
@@ -29,12 +26,11 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.item.PrimedTnt;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Explosion;
+import net.minecraft.world.level.ExplosionDamageCalculator;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -48,12 +44,10 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 
 public final class BlockImpactService {
     private static final int MAX_DEBRIS_PER_IMPACT = 64;
-    private static final int VANILLA_EXPLOSION_RAY_COUNT = 16 * 16 * 16 - 14 * 14 * 14;
-    private static final float BLOCK_RAY_FREE_MIN_POWER = 4.0F;
     private static final long LOW_ALLOCATION_CAPSULE_SCAN_THRESHOLD = 4096L;
+    private static final ExplosionDamageCalculator EXPLOSION_DAMAGE_CALCULATOR =
+            new ExplosionDamageCalculator();
     private static final List<ScheduledExplosion> SCHEDULED_EXPLOSIONS = new ArrayList<>();
-    private static final Set<Explosion> DROP_SAFE_EXPLOSIONS =
-            Collections.newSetFromMap(new IdentityHashMap<>());
 
     private BlockImpactService() {
     }
@@ -138,14 +132,6 @@ public final class BlockImpactService {
 
     public static void clear() {
         SCHEDULED_EXPLOSIONS.clear();
-        DROP_SAFE_EXPLOSIONS.clear();
-    }
-
-    public static void excludeItemEntitiesFromUnstableCollisionExplosion(
-            Explosion explosion, List<Entity> affectedEntities) {
-        if (DROP_SAFE_EXPLOSIONS.contains(explosion)) {
-            affectedEntities.removeIf(entity -> entity instanceof ItemEntity);
-        }
     }
 
     private static void scheduleExplosionChain(
@@ -203,17 +189,8 @@ public final class BlockImpactService {
         if (EventHooks.onExplosionStart(level, visualExplosion)) {
             return ExplosionResult.CANCELLED;
         }
-        DROP_SAFE_EXPLOSIONS.add(visualExplosion);
-        try {
-            if (power >= BLOCK_RAY_FREE_MIN_POWER) {
-                explodeEntitiesWithoutBlockRays(
-                        level, excludedEntity, position, power, visualExplosion, damageSource);
-            } else {
-                visualExplosion.explode();
-            }
-        } finally {
-            DROP_SAFE_EXPLOSIONS.remove(visualExplosion);
-        }
+        damageEntitiesWithoutKnockback(
+                level, excludedEntity, position, power, visualExplosion, damageSource);
         visualExplosion.finalizeExplosion(false);
         sendExplosionPacket(level, position, power, visualExplosion);
         ModCriteriaTriggers.trigger(
@@ -224,7 +201,7 @@ public final class BlockImpactService {
         return new ExplosionResult(true, blockImpact);
     }
 
-    private static void explodeEntitiesWithoutBlockRays(
+    private static void damageEntitiesWithoutKnockback(
             ServerLevel level,
             @Nullable Entity excludedEntity,
             Vec3 position,
@@ -232,10 +209,6 @@ public final class BlockImpactService {
             Explosion explosion,
             DamageSource damageSource) {
         level.gameEvent(excludedEntity, GameEvent.EXPLODE, position);
-        for (int i = 0; i < VANILLA_EXPLOSION_RAY_COUNT; i++) {
-            level.random.nextFloat();
-        }
-
         float diameter = power * 2.0F;
         int minX = Mth.floor(position.x - diameter - 1.0D);
         int maxX = Mth.floor(position.x + diameter + 1.0D);
@@ -245,10 +218,11 @@ public final class BlockImpactService {
         int maxZ = Mth.floor(position.z + diameter + 1.0D);
         List<Entity> entities = level.getEntities(excludedEntity,
                 new AABB(minX, minY, minZ, maxX, maxY, maxZ));
+        entities.removeIf(entity -> entity instanceof ItemEntity);
         EventHooks.onExplosionDetonate(level, explosion, entities, diameter);
 
         for (Entity entity : entities) {
-            if (entity.ignoreExplosion(explosion)) {
+            if (entity instanceof ItemEntity || entity.ignoreExplosion(explosion)) {
                 continue;
             }
             double distanceRatio = Math.sqrt(entity.distanceToSqr(position)) / diameter;
@@ -259,38 +233,13 @@ public final class BlockImpactService {
             double directionY = (entity instanceof PrimedTnt ? entity.getY() : entity.getEyeY())
                     - position.y;
             double directionZ = entity.getZ() - position.z;
-            double directionLength = Math.sqrt(
-                    directionX * directionX
-                            + directionY * directionY
-                            + directionZ * directionZ);
-            if (directionLength == 0.0D) {
+            if (directionX * directionX + directionY * directionY + directionZ * directionZ
+                    <= 1.0E-12D) {
                 continue;
             }
-            directionX /= directionLength;
-            directionY /= directionLength;
-            directionZ /= directionLength;
-            double exposure = Explosion.getSeenPercent(position, entity);
-            double impact = (1.0D - distanceRatio) * exposure;
-            entity.hurt(damageSource,
-                    (float) ((int) ((impact * impact + impact) / 2.0D
-                            * 7.0D * diameter + 1.0D)));
-            double knockback = entity instanceof LivingEntity living
-                    ? impact * (1.0D - living.getAttributeValue(
-                            Attributes.EXPLOSION_KNOCKBACK_RESISTANCE))
-                    : impact;
-            Vec3 knockbackVector = new Vec3(
-                    directionX * knockback,
-                    directionY * knockback,
-                    directionZ * knockback);
-            knockbackVector = EventHooks.getExplosionKnockback(
-                    level, explosion, entity, knockbackVector);
-            entity.setDeltaMovement(entity.getDeltaMovement().add(knockbackVector));
-            if (entity instanceof Player player
-                    && !player.isSpectator()
-                    && (!player.isCreative() || !player.getAbilities().flying)) {
-                explosion.getHitPlayers().put(player, knockbackVector);
-            }
-            entity.onExplosionHit(explosion.getIndirectSourceEntity());
+            entity.hurt(
+                    damageSource,
+                    EXPLOSION_DAMAGE_CALCULATOR.getEntityDamageAmount(explosion, entity));
         }
     }
 
@@ -302,8 +251,8 @@ public final class BlockImpactService {
                 player.connection.send(new ClientboundExplodePacket(
                         position.x, position.y, position.z, power,
                         explosion.getToBlow(),
-                        explosion.getHitPlayers().get(player),
-                        Explosion.BlockInteraction.KEEP,
+                        null,
+                        Explosion.BlockInteraction.DESTROY_WITH_DECAY,
                         ParticleTypes.EXPLOSION,
                         ParticleTypes.EXPLOSION_EMITTER,
                         SoundEvents.GENERIC_EXPLODE));

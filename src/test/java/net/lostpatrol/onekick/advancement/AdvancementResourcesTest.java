@@ -40,8 +40,14 @@ class AdvancementResourcesTest {
         for (Map.Entry<String, String> expected : ADVANCEMENTS.entrySet()) {
             JsonObject advancement = resourceJson(
                     "data/onekick/advancement/" + expected.getKey() + ".json");
-            JsonObject criterion = advancement.getAsJsonObject("criteria")
-                    .entrySet().iterator().next().getValue().getAsJsonObject();
+            JsonObject icon = advancement.getAsJsonObject("display")
+                    .getAsJsonObject("icon");
+            assertTrue(icon.has("id"));
+            assertTrue(!icon.has("item"));
+            var criterionEntry = advancement.getAsJsonObject("criteria")
+                    .entrySet().iterator().next();
+            assertEquals(expected.getValue(), criterionEntry.getKey());
+            JsonObject criterion = criterionEntry.getValue().getAsJsonObject();
             assertEquals("onekick:kick_event", criterion.get("trigger").getAsString());
             String event = criterion.getAsJsonObject("conditions").get("event").getAsString();
             assertEquals(expected.getValue(), event);

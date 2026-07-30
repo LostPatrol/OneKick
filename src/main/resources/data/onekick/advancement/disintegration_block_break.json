@@ -2,7 +2,7 @@
   "parent": "onekick:charged_kick",
   "display": {
     "icon": {
-      "item": "minecraft:iron_pickaxe"
+      "id": "minecraft:iron_pickaxe"
     },
     "title": {
       "translate": "advancements.onekick.disintegration_block_break.title"
