@@ -175,7 +175,8 @@ class KickMathTest {
         assertEquals(3, KickMath.machRingCount(KickMath.MACH_RING_MIN_SPEED));
         assertTrue(KickMath.machRingCount(7.0D) > KickMath.machRingCount(5.0D));
         assertTrue(KickMath.machRingCount(20.0D) > KickMath.machRingCount(6.0D));
-        assertEquals(24, KickMath.machRingCount(Double.MAX_VALUE));
+        assertEquals(KickMath.MACH_RING_RENDER_LIMIT,
+                KickMath.machRingCount(Double.MAX_VALUE));
     }
 
     @Test
@@ -230,8 +231,15 @@ class KickMathTest {
                 < KickMath.disintegrationSmokeParticleCount(100, 6.0D));
         assertTrue(KickMath.disintegrationSmokeParticleCount(1000, 3.0D)
                 > KickMath.disintegrationSmokeParticleCount(100, 3.0D));
-        assertEquals(3072,
+        assertEquals(4096,
                 KickMath.disintegrationSmokeParticleCount(Integer.MAX_VALUE, Double.MAX_VALUE));
+        assertEquals(32,
+                KickMath.disintegrationSmokeParticleCount(1, 4, 1.0D));
+        assertEquals(2048,
+                KickMath.disintegrationSmokeParticleCount(1000, 256, 1.0D));
+        assertEquals(4096,
+                KickMath.disintegrationSmokeParticleCount(
+                        Integer.MAX_VALUE, Integer.MAX_VALUE, Double.MAX_VALUE));
         assertEquals(0.24D, KickMath.impactDebrisInitialSpeed(0.0D, 0.5D), 1.0E-9D);
         assertEquals(1.34D, KickMath.impactDebrisInitialSpeed(10.0D, 0.0D), 1.0E-9D);
         assertEquals(1.69D, KickMath.impactDebrisInitialSpeed(10.0D, 1.0D), 1.0E-9D);
@@ -244,6 +252,9 @@ class KickMathTest {
         assertTrue(KickMath.shouldEmitDisintegrationSmoke(1, 0));
         assertTrue(!KickMath.shouldEmitDisintegrationSmoke(1, 1));
         assertTrue(!KickMath.shouldEmitDisintegrationSmoke(0, 0));
+        assertTrue(KickMath.shouldApplyTraversalDamage(1, 0));
+        assertTrue(!KickMath.shouldApplyTraversalDamage(1, 1));
+        assertTrue(!KickMath.shouldApplyTraversalDamage(0, 0));
     }
 
     @Test
@@ -274,6 +285,9 @@ class KickMathTest {
                 > KickMath.unstableExplosionRadius(5.0D, 3));
         assertTrue(KickMath.unstableExplosionRadius(10.0D, 3)
                 > KickMath.unstableExplosionRadius(10.0D, 1));
+        assertEquals(1.0D, KickMath.unstableExplosionVisualScale(1.0D), 1.0E-9D);
+        assertEquals(1.0D, KickMath.unstableExplosionVisualScale(4.0D), 1.0E-9D);
+        assertEquals(4.0D, KickMath.unstableExplosionVisualScale(16.0D), 1.0E-9D);
     }
 
     @Test

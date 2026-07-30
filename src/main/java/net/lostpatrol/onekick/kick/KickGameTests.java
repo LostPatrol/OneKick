@@ -244,7 +244,7 @@ public final class KickGameTests {
                 attacker.getUUID(), 6.0D, enchantments, ItemStack.EMPTY);
         Vec3 impact = helper.absoluteVec(new Vec3(5.5D, 3.0D, 2.5D));
         BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
-                new Vec3(6.0D, 0.0D, 0.0D), 6.0D, snapshot);
+                new Vec3(6.0D, 0.0D, 0.0D), 6.0D, 5.0F, snapshot);
 
         helper.runAtTickTime(2, () -> {
             unregisterSnapshotAttacker(helper, attacker);
@@ -255,12 +255,15 @@ public final class KickGameTests {
     }
 
     @GameTest(template = "flight_room", timeoutTicks = 20)
-    public static void largeUnstableCollisionKeepsEntityDamageAndKnockback(GameTestHelper helper) {
+    public static void unstableCollisionUsesUniformDamageWithoutKnockback(GameTestHelper helper) {
         ServerPlayer attacker = registerSnapshotAttacker(helper);
         Villager impactedEntity = helper.spawn(EntityType.VILLAGER, 6, 3, 2);
         impactedEntity.setInvulnerable(true);
-        var bystander = helper.spawn(EntityType.IRON_GOLEM, 8, 3, 2);
-        float startingHealth = bystander.getHealth();
+        Villager nearBystander = helper.spawn(EntityType.VILLAGER, 7, 3, 2);
+        Villager farBystander = helper.spawn(EntityType.VILLAGER, 13, 3, 2);
+        float nearStartingHealth = nearBystander.getHealth();
+        float farStartingHealth = farBystander.getHealth();
+        float impactDamage = 5.0F;
 
         KickEnchantments enchantments = new KickEnchantments(
                 0, 0, 0, 3, 0, 0, 0, 0, false);
@@ -268,13 +271,18 @@ public final class KickGameTests {
                 attacker.getUUID(), 6.0D, enchantments, ItemStack.EMPTY);
         Vec3 impact = helper.absoluteVec(new Vec3(5.5D, 3.0D, 2.5D));
         BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
-                new Vec3(6.0D, 0.0D, 0.0D), 6.0D, snapshot);
+                new Vec3(6.0D, 0.0D, 0.0D), 6.0D, impactDamage, snapshot);
 
         unregisterSnapshotAttacker(helper, attacker);
-        helper.assertTrue(bystander.getHealth() < startingHealth,
-                "Large unstable collision did not retain explosion damage");
-        helper.assertTrue(bystander.getDeltaMovement().x > 0.0D,
-                "Large unstable collision did not retain explosion knockback");
+        helper.assertTrue(Math.abs(
+                        nearBystander.getHealth() - (nearStartingHealth - impactDamage)) < 1.0E-4F,
+                "Near unstable-collision target did not receive the kinetic impact damage");
+        helper.assertTrue(Math.abs(
+                        farBystander.getHealth() - (farStartingHealth - impactDamage)) < 1.0E-4F,
+                "Far unstable-collision target received distance-scaled damage");
+        helper.assertTrue(nearBystander.getDeltaMovement().lengthSqr() < 1.0E-8D
+                        && farBystander.getDeltaMovement().lengthSqr() < 1.0E-8D,
+                "Unstable collision changed a bystander's velocity");
         helper.succeed();
     }
 
@@ -309,7 +317,7 @@ public final class KickGameTests {
                 return;
             }
             BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
-                    new Vec3(1.0D, 0.0D, 0.0D), 1.0D, snapshot);
+                    new Vec3(1.0D, 0.0D, 0.0D), 1.0D, 1.0F, snapshot);
             helper.assertTrue(countGlassDrops(helper, impact) == 0,
                     "Enabled Kinetic Overload drop protection created block drops");
             helper.assertTrue(countDiamondDrops(helper, impact) > 0,
@@ -320,7 +328,7 @@ public final class KickGameTests {
             helper.assertTrue(disableResult == 1, "Could not disable Kinetic Overload drop protection");
             fillKineticOverloadDropProtectionVolume(helper);
             BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
-                    new Vec3(1.0D, 0.0D, 0.0D), 1.0D, snapshot);
+                    new Vec3(1.0D, 0.0D, 0.0D), 1.0D, 1.0F, snapshot);
             helper.assertTrue(countGlassDrops(helper, impact) > 0,
                     "Disabled Kinetic Overload drop protection did not restore block drops");
             helper.succeed();
@@ -344,7 +352,7 @@ public final class KickGameTests {
                 attacker.getUUID(), 6.0D, enchantments, ItemStack.EMPTY);
         Vec3 impact = helper.absoluteVec(new Vec3(5.5D, 3.0D, 2.5D));
         BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
-                new Vec3(6.0D, 0.0D, 0.0D), 6.0D, snapshot);
+                new Vec3(6.0D, 0.0D, 0.0D), 6.0D, 5.0F, snapshot);
 
         helper.runAtTickTime(2, () -> {
             long drops = countCobblestoneDrops(helper, impact);
@@ -373,7 +381,7 @@ public final class KickGameTests {
                 attacker.getUUID(), 6.0D, enchantments, ItemStack.EMPTY);
         Vec3 impact = helper.absoluteVec(new Vec3(5.5D, 3.0D, 2.5D));
         BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
-                new Vec3(6.0D, 0.0D, 0.0D), 6.0D, snapshot);
+                new Vec3(6.0D, 0.0D, 0.0D), 6.0D, 5.0F, snapshot);
 
         helper.runAtTickTime(8, () -> {
             long drops = countCobblestoneDrops(helper, impact);

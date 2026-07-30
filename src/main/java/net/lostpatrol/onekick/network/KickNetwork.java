@@ -26,8 +26,8 @@ public final class KickNetwork {
     public static final byte ANIMATION_CHARGE = 0;
     public static final byte ANIMATION_KICK = 1;
     public static final byte ANIMATION_STOP = 2;
-    private static final String PROTOCOL = "5";
-    private static final int MAX_DISINTEGRATION_SMOKE_ORIGINS = 1024;
+    private static final String PROTOCOL = "6";
+    private static final int MAX_DISINTEGRATION_SMOKE_ORIGINS = 256;
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(OneKick.MOD_ID, "main"),
             () -> PROTOCOL,
@@ -66,6 +66,12 @@ public final class KickNetwork {
                 .decoder(DisintegrationSmokePacket::decode)
                 .consumerMainThread(KickNetwork::handleDisintegrationSmoke)
                 .add();
+        CHANNEL.messageBuilder(
+                        UnstableExplosionPacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(UnstableExplosionPacket::encode)
+                .decoder(UnstableExplosionPacket::decode)
+                .consumerMainThread(KickNetwork::handleUnstableExplosion)
+                .add();
     }
 
     public static void sendInput(boolean pressed) {
@@ -73,9 +79,16 @@ public final class KickNetwork {
     }
 
     public static void broadcastChargeState(
-            ServerPlayer player, boolean active, float charge, float maximum, int chargeLevel) {
+            ServerPlayer player,
+            boolean active,
+            float charge,
+            float maximum,
+            int chargeLevel,
+            int kineticOverloadLevel) {
         CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player),
-                new ChargeStatePacket(player.getId(), active, charge, maximum, chargeLevel));
+                new ChargeStatePacket(
+                        player.getId(), active, charge, maximum,
+                        chargeLevel, kineticOverloadLevel));
     }
 
     public static void sendChargeState(
@@ -84,9 +97,12 @@ public final class KickNetwork {
             boolean active,
             float charge,
             float maximum,
-            int chargeLevel) {
+            int chargeLevel,
+            int kineticOverloadLevel) {
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> receiver),
-                new ChargeStatePacket(chargingPlayer.getId(), active, charge, maximum, chargeLevel));
+                new ChargeStatePacket(
+                        chargingPlayer.getId(), active, charge, maximum,
+                        chargeLevel, kineticOverloadLevel));
     }
 
     public static void broadcastPlayerAnimation(ServerPlayer player, byte animation) {
@@ -134,6 +150,17 @@ public final class KickNetwork {
         double range = Math.min(256.0D, 64.0D + smokeOriginExtent(smokeOrigins, center));
         for (ServerPlayer player : level.players()) {
             if (player.distanceToSqr(center) <= range * range) {
+                CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
+            }
+        }
+    }
+
+    public static void broadcastUnstableExplosion(
+            ServerLevel level, Vec3 position, float radius) {
+        UnstableExplosionPacket packet =
+                new UnstableExplosionPacket(position.x, position.y, position.z, radius);
+        for (ServerPlayer player : level.players()) {
+            if (player.distanceToSqr(position) < 4096.0D) {
                 CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
             }
         }
@@ -195,7 +222,7 @@ public final class KickNetwork {
             ChargeStatePacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
                 ClientKickState.updateCharge(packet.entityId(), packet.active(), packet.charge(),
-                        packet.maximum(), packet.chargeLevel()));
+                        packet.maximum(), packet.chargeLevel(), packet.kineticOverloadLevel()));
     }
 
     private static void handlePlayerAnimation(
@@ -222,6 +249,14 @@ public final class KickNetwork {
                         packet.impactSpeed(), packet.affectedBlocks(), packet.smokeOrigins()));
     }
 
+    private static void handleUnstableExplosion(
+            UnstableExplosionPacket packet,
+            Supplier<NetworkEvent.Context> contextSupplier) {
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
+                ClientKickState.emitUnstableExplosion(
+                        new Vec3(packet.x(), packet.y(), packet.z()), packet.radius()));
+    }
+
     private record KickInputPacket(boolean pressed) {
         private static void encode(KickInputPacket packet, FriendlyByteBuf buffer) {
             buffer.writeBoolean(packet.pressed);
@@ -233,18 +268,24 @@ public final class KickNetwork {
     }
 
     private record ChargeStatePacket(
-            int entityId, boolean active, float charge, float maximum, int chargeLevel) {
+            int entityId,
+            boolean active,
+            float charge,
+            float maximum,
+            int chargeLevel,
+            int kineticOverloadLevel) {
         private static void encode(ChargeStatePacket packet, FriendlyByteBuf buffer) {
             buffer.writeVarInt(packet.entityId);
             buffer.writeBoolean(packet.active);
             buffer.writeFloat(packet.charge);
             buffer.writeFloat(packet.maximum);
             buffer.writeVarInt(packet.chargeLevel);
+            buffer.writeVarInt(packet.kineticOverloadLevel);
         }
 
         private static ChargeStatePacket decode(FriendlyByteBuf buffer) {
             return new ChargeStatePacket(buffer.readVarInt(), buffer.readBoolean(), buffer.readFloat(),
-                    buffer.readFloat(), buffer.readVarInt());
+                    buffer.readFloat(), buffer.readVarInt(), buffer.readVarInt());
         }
     }
 
@@ -336,6 +377,22 @@ public final class KickNetwork {
             return new DisintegrationSmokePacket(
                     impactX, impactY, impactZ, directionX, directionY, directionZ,
                     impactSpeed, affectedBlocks, List.copyOf(smokeOrigins));
+        }
+    }
+
+    private record UnstableExplosionPacket(double x, double y, double z, float radius) {
+        private static void encode(
+                UnstableExplosionPacket packet, FriendlyByteBuf buffer) {
+            buffer.writeDouble(packet.x);
+            buffer.writeDouble(packet.y);
+            buffer.writeDouble(packet.z);
+            buffer.writeFloat(packet.radius);
+        }
+
+        private static UnstableExplosionPacket decode(FriendlyByteBuf buffer) {
+            return new UnstableExplosionPacket(
+                    buffer.readDouble(), buffer.readDouble(),
+                    buffer.readDouble(), buffer.readFloat());
         }
     }
 }

@@ -57,6 +57,16 @@ class ClientKickStateTest {
                 ClientKickState.sampleMachTrail(trail, 7.0D).point());
     }
 
+    @Test
+    void chargeSmokeShellGrowsWithTheChargeEnchantmentLevel() {
+        assertEquals(1.12D, ClientKickState.chargeSmokeMaximumRadius(1), EPSILON);
+        assertEquals(2.4D, ClientKickState.chargeSmokeMaximumRadius(5), EPSILON);
+        for (int level = 2; level <= 5; level++) {
+            assertTrue(ClientKickState.chargeSmokeMaximumRadius(level)
+                    > ClientKickState.chargeSmokeMaximumRadius(level - 1));
+        }
+    }
+
     private static void assertVecEquals(Vec3 expected, Vec3 actual) {
         assertTrue(expected.distanceToSqr(actual) <= EPSILON * EPSILON,
                 () -> "Expected " + expected + " but got " + actual);

@@ -66,6 +66,8 @@ public final class ClientEvents {
             event.registerSpriteSet(ModParticleTypes.MACH_TRAIL.get(), MachTrailParticle.Provider::new);
             event.registerSpriteSet(ModParticleTypes.DISINTEGRATION_SMOKE.get(),
                     DisintegrationSmokeParticle.Provider::new);
+            event.registerSpriteSet(ModParticleTypes.UNSTABLE_EXPLOSION.get(),
+                    UnstableExplosionParticle.Provider::new);
         }
 
         @SubscribeEvent

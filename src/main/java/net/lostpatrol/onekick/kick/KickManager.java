@@ -75,9 +75,11 @@ public final class KickManager {
             state.chargeFoodDebt = 0.0F;
             state.chargeLevel = chargeLevel;
             state.overchargeLevel = enchantments.overcharge();
+            state.kineticOverloadLevel = enchantments.kineticOverload();
             state.chargeMaximum = KickMath.maxCharge(chargeLevel, state.overchargeLevel);
             KickNetwork.broadcastChargeState(
-                    player, true, 0.0F, state.chargeMaximum, state.chargeLevel);
+                    player, true, 0.0F, state.chargeMaximum,
+                    state.chargeLevel, state.kineticOverloadLevel);
             KickNetwork.broadcastPlayerAnimation(player, KickNetwork.ANIMATION_CHARGE);
         } else if (state.charging) {
             releaseCharge(player, state);
@@ -104,6 +106,7 @@ public final class KickManager {
             cancelCharge(player, state);
             return;
         }
+        state.kineticOverloadLevel = currentEnchantments.kineticOverload();
         if (state.charge < state.chargeMaximum && canGrowCharge(player)) {
             float increase = Math.min(
                     KickMath.chargePerTick(state.chargeLevel), state.chargeMaximum - state.charge);
@@ -120,7 +123,8 @@ public final class KickManager {
         }
         if ((player.tickCount & 1) == 0) {
             KickNetwork.broadcastChargeState(
-                    player, true, state.charge, state.chargeMaximum, state.chargeLevel);
+                    player, true, state.charge, state.chargeMaximum,
+                    state.chargeLevel, state.kineticOverloadLevel);
         }
     }
 
@@ -204,7 +208,7 @@ public final class KickManager {
                     : firstBlockImpact.location()
                     : entityCollision.getBoundingBox().getCenter();
             BlockImpactService.handleImpact(level, entity, impact, flightVelocity,
-                    state.initialVelocity.length(), state.snapshot);
+                    state.initialVelocity.length(), damage, state.snapshot);
             KickEnchantments enchantments = state.snapshot.enchantments();
             if (entity.isAlive()
                     && (enchantments.disintegration() > 0 || enchantments.unstableCollision() > 0)) {
@@ -239,7 +243,7 @@ public final class KickManager {
     public static void removePlayer(ServerPlayer player) {
         PlayerKickState state = PLAYER_STATES.remove(player.getUUID());
         if (state != null && state.charging) {
-            KickNetwork.broadcastChargeState(player, false, 0.0F, 0.0F, 0);
+            KickNetwork.broadcastChargeState(player, false, 0.0F, 0.0F, 0, 0);
             KickNetwork.broadcastPlayerAnimation(player, KickNetwork.ANIMATION_STOP);
         }
     }
@@ -260,7 +264,8 @@ public final class KickManager {
             PlayerKickState playerState = PLAYER_STATES.get(trackedPlayer.getUUID());
             if (playerState != null && playerState.charging) {
                 KickNetwork.sendChargeState(observer, trackedPlayer, true, playerState.charge,
-                        playerState.chargeMaximum, playerState.chargeLevel);
+                        playerState.chargeMaximum, playerState.chargeLevel,
+                        playerState.kineticOverloadLevel);
                 KickNetwork.sendPlayerAnimation(observer, trackedPlayer, KickNetwork.ANIMATION_CHARGE);
             }
         }
@@ -284,7 +289,8 @@ public final class KickManager {
         state.charge = 0.0F;
         state.chargeFoodDebt = 0.0F;
         KickNetwork.broadcastChargeState(
-                player, false, 0.0F, state.chargeMaximum, state.chargeLevel);
+                player, false, 0.0F, state.chargeMaximum,
+                state.chargeLevel, state.kineticOverloadLevel);
         performKick(player, effectiveCharge);
     }
 
@@ -292,7 +298,7 @@ public final class KickManager {
         state.charging = false;
         state.charge = 0.0F;
         state.chargeFoodDebt = 0.0F;
-        KickNetwork.broadcastChargeState(player, false, 0.0F, 0.0F, 0);
+        KickNetwork.broadcastChargeState(player, false, 0.0F, 0.0F, 0, 0);
         KickNetwork.broadcastPlayerAnimation(player, KickNetwork.ANIMATION_STOP);
     }
 
@@ -434,9 +440,12 @@ public final class KickManager {
         Vec3 movedPosition = entity.position();
         state.traversalRemaining -= movedPosition.distanceTo(currentPosition);
         state.traversalTicks++;
-        if (state.traversalTicks % 3 == 0) {
+        KickEnchantments enchantments = state.snapshot.enchantments();
+        if (state.traversalTicks % 3 == 0
+                && KickMath.shouldApplyTraversalDamage(
+                        enchantments.disintegration(), enchantments.unstableCollision())) {
             float damage = KickMath.traversalDamage(
-                    state.traversalSpeed, state.snapshot.enchantments().kineticOverload());
+                    state.traversalSpeed, enchantments.kineticOverload());
             entity.invulnerableTime = 0;
             if (entity.hurt(level.damageSources().flyIntoWall(), damage)) {
                 recordKickDamage(level, state, damage);
@@ -840,6 +849,7 @@ public final class KickManager {
         private boolean charging;
         private int chargeLevel;
         private int overchargeLevel;
+        private int kineticOverloadLevel;
         private float charge;
         private float chargeMaximum;
         private float chargeFoodDebt;

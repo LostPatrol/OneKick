@@ -16,6 +16,7 @@ public final class KickMath {
     public static final float CHARGE_SPEED_MULTIPLIER = 6.0F;
     public static final double MACH_RING_MIN_SPEED = 4.5D;
     public static final double MACH_RING_BASE_INTERVAL = 21.375D;
+    public static final int MACH_RING_RENDER_LIMIT = 12;
     public static final double IRREGULAR_DESTRUCTION_MIN_SCALE = 0.82D;
     public static final double IRREGULAR_DESTRUCTION_MAX_SCALE = 1.18D;
     private static final double CHARGE_QUADRATIC_COEFFICIENT = 1.0D / 15.0D;
@@ -26,6 +27,9 @@ public final class KickMath {
     private static final double SUBMERGED_DRAG = 0.82D;
     private static final double SUBMERGED_GRAVITY = 0.02D;
     private static final double MIN_IMPACT_ALIGNMENT = Math.cos(Math.toRadians(35.0D));
+    private static final double UNSTABLE_EXPLOSION_MIN_VISUAL_RADIUS = 4.0D;
+    private static final int DISINTEGRATION_SMOKE_PER_ORIGIN = 8;
+    private static final int MAX_DISINTEGRATION_SMOKE_PARTICLES = 4096;
 
     private KickMath() {
     }
@@ -155,6 +159,11 @@ public final class KickMath {
         return Math.max(0, unstableLevel) / 3.0D;
     }
 
+    public static double unstableExplosionVisualScale(double radius) {
+        return Math.max(1.0D,
+                nonNegative(radius) / UNSTABLE_EXPLOSION_MIN_VISUAL_RADIUS);
+    }
+
     public static boolean shouldSuppressKineticOverloadBlockDrops(
             boolean protectionEnabled, int overloadLevel) {
         return protectionEnabled && overloadLevel > 0;
@@ -202,6 +211,11 @@ public final class KickMath {
                 nonNegative(impactSpeed) * 1.25D * (1.0D + Math.max(0, overloadLevel) * 0.35D));
     }
 
+    public static boolean shouldApplyTraversalDamage(
+            int disintegrationLevel, int unstableCollisionLevel) {
+        return disintegrationLevel > 0 && unstableCollisionLevel <= 0;
+    }
+
     public static int flightEffectTier(double launchSpeed) {
         double speed = nonNegative(launchSpeed);
         if (speed < 0.65D) {
@@ -237,7 +251,7 @@ public final class KickMath {
     public static int machRingCount(double launchSpeed) {
         double excessSpeed = Math.max(0.0D,
                 nonNegative(launchSpeed) - MACH_RING_MIN_SPEED);
-        int extraRings = (int) Math.min(21.0D,
+        int extraRings = (int) Math.min(MACH_RING_RENDER_LIMIT - 3.0D,
                 Math.floor(Math.log1p(excessSpeed) * 4.0D));
         return 3 + extraRings;
     }
@@ -274,14 +288,22 @@ public final class KickMath {
 
     public static int disintegrationSmokeParticleCount(
             int affectedBlocks, double impactSpeed) {
+        return disintegrationSmokeParticleCount(affectedBlocks, 0, impactSpeed);
+    }
+
+    public static int disintegrationSmokeParticleCount(
+            int affectedBlocks, int smokeOriginCount, double impactSpeed) {
         double speed = nonNegative(impactSpeed);
         if (affectedBlocks <= 0 || speed <= 0.0D) {
             return 0;
         }
         double speedScale = speed * speed / 6.0D;
-        return (int) Math.min(3072.0D,
-                Math.ceil((32.0D + Math.sqrt(affectedBlocks) * 8.0D)
-                        * speedScale));
+        double speedScaledCount = Math.ceil(
+                (32.0D + Math.sqrt(affectedBlocks) * 8.0D) * speedScale);
+        long coverageCount = (long) Math.max(0, smokeOriginCount)
+                * DISINTEGRATION_SMOKE_PER_ORIGIN;
+        return (int) Math.min(MAX_DISINTEGRATION_SMOKE_PARTICLES,
+                Math.max(speedScaledCount, coverageCount));
     }
 
     public static double impactDebrisInitialSpeed(double impactSpeed, double variation) {

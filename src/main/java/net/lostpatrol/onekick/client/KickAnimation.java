@@ -26,6 +26,29 @@ final class KickAnimation {
         return poseFromDirection(directionX, directionY, directionZ);
     }
 
+    static Pose chargePose(
+            int chargeLevel, int kineticOverloadLevel, double ageInTicks) {
+        return kineticOverloadLevel > 0
+                ? kineticOverloadChargePose(chargeLevel, ageInTicks)
+                : chargePose(chargeLevel, ageInTicks);
+    }
+
+    static Pose kineticOverloadChargePose(int chargeLevel, double ageInTicks) {
+        double amplitude = kineticOverloadJitterAmplitude(chargeLevel);
+        double lateral = amplitude * (
+                Math.sin(ageInTicks * 4.7D)
+                        + Math.sin(ageInTicks * 11.3D + 0.7D) * 0.35D);
+        double vertical = amplitude * (
+                Math.sin(ageInTicks * 6.1D + 1.4D)
+                        + Math.sin(ageInTicks * 13.7D) * 0.30D);
+        double baseY = Math.cos(READY_POSE.xRot);
+        double baseZ = Math.sin(READY_POSE.xRot);
+        return poseFromDirection(
+                lateral,
+                baseY - baseZ * vertical,
+                baseZ + baseY * vertical);
+    }
+
     static Pose kickPose(Pose start, float elapsedTicks) {
         if (elapsedTicks <= STRIKE_TICKS) {
             return interpolateDirection(
@@ -53,6 +76,11 @@ final class KickAnimation {
     static double chargeAngularSpeed(int chargeLevel) {
         int level = Math.max(1, Math.min(5, chargeLevel));
         return lerp((level - 1) / 4.0D, 0.15D, 1.025D);
+    }
+
+    static double kineticOverloadJitterAmplitude(int chargeLevel) {
+        int level = Math.max(1, Math.min(5, chargeLevel));
+        return lerp((level - 1) / 4.0D, Math.toRadians(1.5D), Math.toRadians(3.0D));
     }
 
     private static Pose interpolateDirection(Pose start, Pose end, float progress) {
