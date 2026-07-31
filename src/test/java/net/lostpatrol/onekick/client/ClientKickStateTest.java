@@ -114,6 +114,22 @@ class ClientKickStateTest {
                 eye, foot, downward, 6.0D, 1.0D));
     }
 
+    @Test
+    void chargeSmokeParticlesTravelAtAConstantSpeedAndStopAtTheFoot() {
+        Vec3 start = new Vec3(1.0D, 2.0D, 3.0D);
+        Vec3 target = new Vec3(4.0D, 6.0D, 3.0D);
+        Vec3 first = ChargeSmokeParticle.nextPositionAtConstantSpeed(start, target);
+        Vec3 second = ChargeSmokeParticle.nextPositionAtConstantSpeed(first, target);
+
+        assertEquals(ChargeSmokeParticle.TRAVEL_DISTANCE_PER_TICK,
+                first.distanceTo(start), EPSILON);
+        assertEquals(ChargeSmokeParticle.TRAVEL_DISTANCE_PER_TICK,
+                second.distanceTo(first), EPSILON);
+        assertTrue(first.distanceTo(target) < start.distanceTo(target));
+        assertVecEquals(target, ChargeSmokeParticle.nextPositionAtConstantSpeed(
+                target.add(0.1D, -0.1D, 0.0D), target));
+    }
+
     private static void assertVecEquals(Vec3 expected, Vec3 actual) {
         assertTrue(expected.distanceToSqr(actual) <= EPSILON * EPSILON,
                 () -> "Expected " + expected + " but got " + actual);
