@@ -58,13 +58,66 @@ class ClientKickStateTest {
     }
 
     @Test
-    void chargeSmokeShellGrowsWithTheChargeEnchantmentLevel() {
-        assertEquals(1.12D, ClientKickState.chargeSmokeMaximumRadius(1), EPSILON);
-        assertEquals(2.4D, ClientKickState.chargeSmokeMaximumRadius(5), EPSILON);
-        for (int level = 2; level <= 5; level++) {
-            assertTrue(ClientKickState.chargeSmokeMaximumRadius(level)
-                    > ClientKickState.chargeSmokeMaximumRadius(level - 1));
+    void chargeSmokeScaleUsesTheChargeLimitAndMakesTheConeWiderThanTheRing() {
+        assertEquals(1.0D, ClientKickState.chargeSmokeScale(2.0D), EPSILON);
+        assertEquals(2.0D, ClientKickState.chargeSmokeScale(8.0D), EPSILON);
+        assertEquals(3.0D, ClientKickState.chargeSmokeScale(18.0D), EPSILON);
+        assertEquals(2.9D, ClientKickState.chargeSmokeMaximumReach(2.0D), EPSILON);
+        assertEquals(5.5D, ClientKickState.chargeSmokeMaximumReach(18.0D), EPSILON);
+
+        for (double maximum = 3.0D; maximum <= 18.0D; maximum += 1.0D) {
+            assertTrue(ClientKickState.chargeSmokeMaximumReach(maximum)
+                    > ClientKickState.chargeSmokeMaximumReach(maximum - 1.0D));
+            assertTrue(ClientKickState.chargeSmokeMaximumRingRadius(maximum)
+                    > ClientKickState.chargeSmokeMaximumRingRadius(maximum - 1.0D));
+            assertTrue(ClientKickState.chargeSmokeRingParticleCount(maximum)
+                    >= ClientKickState.chargeSmokeRingParticleCount(maximum - 1.0D));
         }
+        assertTrue(ClientKickState.chargeSmokeMaximumConeRadius(6.0D)
+                > ClientKickState.chargeSmokeMaximumRingRadius(6.0D) * 1.3D);
+    }
+
+    @Test
+    void chargeSmokeStartsWithARingThenAddsTheFunnelAndFinishesAtFullCharge() {
+        assertEquals(1.0D, ClientKickState.chargeRingRemainingScale(0.0D), EPSILON);
+        assertEquals(1.0D, ClientKickState.chargeRingRemainingScale(0.08D), EPSILON);
+        assertEquals(0, ClientKickState.chargeSmokeConeParticleCount(6.0D, 0.37D));
+        assertTrue(ClientKickState.chargeRingRemainingScale(0.38D) < 0.3D);
+        assertTrue(ClientKickState.chargeSmokeConeParticleCount(6.0D, 0.38D) > 0);
+        assertEquals(1.0D, ClientKickState.chargeConeRemainingScale(0.38D), EPSILON);
+        assertTrue(ClientKickState.chargeRingRemainingScale(0.5D) > 0.0D);
+        assertTrue(ClientKickState.chargeConeRemainingScale(0.5D) > 0.0D);
+        assertTrue(ClientKickState.chargeRingRemainingScale(0.999D) > 0.0D);
+        assertTrue(ClientKickState.chargeConeRemainingScale(0.999D) > 0.0D);
+        assertEquals(0.0D, ClientKickState.chargeRingRemainingScale(1.0D), EPSILON);
+        assertEquals(0.0D, ClientKickState.chargeConeRemainingScale(1.0D), EPSILON);
+    }
+
+    @Test
+    void chargeSmokeRingUsesTheFullViewDirectionIncludingPitch() {
+        Vec3 eye = new Vec3(2.0D, 5.0D, -3.0D);
+        Vec3 foot = new Vec3(2.5D, 3.8D, -2.4D);
+        Vec3 horizontal = new Vec3(0.0D, 0.0D, 1.0D);
+        Vec3 upward = new Vec3(0.0D, 1.0D, 1.0D).normalize();
+        Vec3 downward = new Vec3(0.0D, -1.0D, 1.0D).normalize();
+
+        Vec3 horizontalCenter = ClientKickState.chargeSmokeRingCenter(
+                eye, foot, horizontal, 6.0D, 0.0D);
+        Vec3 upwardCenter = ClientKickState.chargeSmokeRingCenter(
+                eye, foot, upward, 6.0D, 0.0D);
+        Vec3 downwardCenter = ClientKickState.chargeSmokeRingCenter(
+                eye, foot, downward, 6.0D, 0.0D);
+        assertEquals(eye.y, horizontalCenter.y, EPSILON);
+        assertTrue(upwardCenter.y > horizontalCenter.y);
+        assertTrue(downwardCenter.y < horizontalCenter.y);
+
+        ClientKickState.ChargeSmokeBasis basis = ClientKickState.chargeSmokeBasis(upward);
+        assertEquals(0.0D, basis.forward().dot(basis.right()), EPSILON);
+        assertEquals(0.0D, basis.forward().dot(basis.up()), EPSILON);
+        assertVecEquals(foot, ClientKickState.chargeSmokeRingCenter(
+                eye, foot, upward, 6.0D, 1.0D));
+        assertVecEquals(foot, ClientKickState.chargeSmokeConeCenter(
+                eye, foot, downward, 6.0D, 1.0D));
     }
 
     private static void assertVecEquals(Vec3 expected, Vec3 actual) {

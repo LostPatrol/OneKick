@@ -39,7 +39,9 @@ public final class ClientKickState {
     private static final int MACH_RING_MIN_LAYERS = 2;
     private static final int MACH_RING_MAX_LAYERS = 6;
     private static final int MACH_RING_MAX_PREDICTION_TICKS = 512;
-    private static final int CHARGE_SMOKE_PULSE_TICKS = 18;
+    private static final double CHARGE_RING_HOLD_PROGRESS = 0.08D;
+    private static final double CHARGE_CONE_START_PROGRESS = 0.38D;
+    private static final double CHARGE_RING_SCALE_AT_CONE_START = 0.26D;
     private static final int UNSTABLE_EXPLOSION_LIFETIME_TICKS = 8;
     private static final ResourceLocation JUMP_BAR_BACKGROUND_SPRITE =
             ResourceLocation.withDefaultNamespace("hud/jump_bar_background");
@@ -379,43 +381,210 @@ public final class ClientKickState {
 
     private static void emitBaseChargeSmoke(
             ClientLevel level, Player player, ChargeVisual visual) {
-        int enchantmentLevel = Mth.clamp(visual.level, 1, 5);
         double chargeProgress = Mth.clamp(visual.charge / visual.maximum, 0.0F, 1.0F);
-        long elapsed = Math.max(0L, level.getGameTime() - visual.startedAt);
-        double pulseProgress = (elapsed % CHARGE_SMOKE_PULSE_TICKS + 0.5D)
-                / CHARGE_SMOKE_PULSE_TICKS;
-        double pulseEnvelope = Math.sin(Math.PI * pulseProgress);
-        double maximumRadius = chargeSmokeMaximumRadius(enchantmentLevel)
-                * (0.72D + chargeProgress * 0.28D);
-        double radius = maximumRadius * (0.42D + pulseProgress * 0.58D);
-        int count = 1 + enchantmentLevel / 2
-                + (int) Math.floor(pulseEnvelope * (enchantmentLevel + 1))
-                + (int) Math.floor(chargeProgress * enchantmentLevel * 0.6D);
-        if (chargeProgress >= 0.999D) {
-            count += 2;
+        ChargeSmokeBasis basis = chargeSmokeBasis(player.getLookAngle());
+        Vec3 foot = chargeSmokeFoot(player);
+        Vec3 eye = player.getEyePosition();
+        if (visual.initialRingPending && chargeProgress < 1.0D) {
+            visual.initialRingPending = false;
+            emitInitialChargeRing(
+                    level, player, eye, foot, basis, visual.maximum, chargeProgress);
         }
+        if (chargeProgress >= 1.0D) {
+            return;
+        }
+        if (chargeProgress < CHARGE_CONE_START_PROGRESS) {
+            return;
+        }
+        if (chargeProgress <= visual.lastFunnelEmissionProgress + 1.0E-6D) {
+            return;
+        }
+        visual.lastFunnelEmissionProgress = chargeProgress;
+        emitChargeFunnel(
+                level, player, eye, foot, basis, visual.maximum, chargeProgress);
+    }
 
-        RandomSource random = player.getRandom();
-        Vec3 center = player.position().add(0.0D, player.getBbHeight() * 0.55D, 0.0D);
-        double spriteProgress = Mth.clamp(
-                0.92D - enchantmentLevel * 0.13D - pulseEnvelope * 0.18D,
-                0.0D, 1.0D);
-        for (int i = 0; i < count; i++) {
-            double vertical = random.nextDouble() * 2.0D - 1.0D;
-            double horizontal = Math.sqrt(Math.max(0.0D, 1.0D - vertical * vertical));
-            double angle = random.nextDouble() * Mth.TWO_PI;
-            Vec3 point = center.add(
-                    Math.cos(angle) * horizontal * radius,
-                    vertical * radius,
-                    Math.sin(angle) * horizontal * radius);
-            level.addAlwaysVisibleParticle(
-                    ParticleTypes.EXPLOSION, true,
-                    point.x, point.y, point.z, spriteProgress, 0.0D, 0.0D);
+    private static void emitInitialChargeRing(
+            ClientLevel level,
+            Player player,
+            Vec3 eye,
+            Vec3 foot,
+            ChargeSmokeBasis basis,
+            double maximumCharge,
+            double chargeProgress) {
+        double radius = chargeSmokeRingRadius(maximumCharge, chargeProgress);
+        Vec3 center = chargeSmokeRingCenter(
+                eye, foot, basis.forward, maximumCharge, chargeProgress);
+        int ringPoints = chargeSmokeRingParticleCount(maximumCharge);
+        float particleSize = (float) Mth.clamp(
+                0.22D + chargeSmokeScale(maximumCharge) * 0.055D,
+                0.24D, 0.42D);
+        for (int i = 0; i < ringPoints; i++) {
+            double angle = Mth.TWO_PI * i / ringPoints;
+            Vec3 point = center
+                    .add(basis.right.scale(Math.cos(angle) * radius))
+                    .add(basis.up.scale(Math.sin(angle) * radius));
+            ChargeSmokeParticle.spawnRing(
+                    level, player, point, chargeProgress, particleSize);
         }
     }
 
-    static double chargeSmokeMaximumRadius(int chargeLevel) {
-        return 0.8D + Mth.clamp(chargeLevel, 1, 5) * 0.32D;
+    private static void emitChargeFunnel(
+            ClientLevel level,
+            Player player,
+            Vec3 eye,
+            Vec3 foot,
+            ChargeSmokeBasis basis,
+            double maximumCharge,
+            double chargeProgress) {
+        double remaining = chargeConeRemainingScale(chargeProgress);
+        double radius = chargeSmokeMaximumConeRadius(maximumCharge) * remaining;
+        Vec3 center = chargeSmokeConeCenter(
+                eye, foot, basis.forward, maximumCharge, chargeProgress);
+        Vec3 funnelAxis = center.subtract(foot);
+        RandomSource random = player.getRandom();
+        int smokeCount = chargeSmokeConeParticleCount(maximumCharge, chargeProgress);
+        float particleSize = (float) Mth.clamp(
+                0.15D + chargeSmokeScale(maximumCharge) * 0.04D,
+                0.17D, 0.31D);
+        for (int i = 0; i < smokeCount; i++) {
+            double axial = 0.08D + Math.pow(random.nextDouble(), 0.58D) * 0.92D;
+            double crossSection = radius * Math.pow(axial, 0.42D)
+                    * Math.sqrt(random.nextDouble());
+            double angle = random.nextDouble() * Mth.TWO_PI;
+            Vec3 point = foot
+                    .add(funnelAxis.scale(axial))
+                    .add(basis.right.scale(Math.cos(angle) * crossSection))
+                    .add(basis.up.scale(Math.sin(angle) * crossSection));
+            ChargeSmokeParticle.spawnFunnel(
+                    level, player, point, chargeProgress, particleSize);
+        }
+    }
+
+    static double chargeSmokeProgress(int entityId) {
+        ChargeVisual visual = CHARGING_PLAYERS.get(entityId);
+        if (visual == null || visual.maximum <= 0.0F) {
+            return -1.0D;
+        }
+        return Mth.clamp(visual.charge / visual.maximum, 0.0F, 1.0F);
+    }
+
+    static Vec3 chargeSmokeFoot(Player player) {
+        Vec3 horizontal = player.getLookAngle().multiply(1.0D, 0.0D, 1.0D);
+        if (horizontal.lengthSqr() < 1.0E-6D) {
+            double yaw = Math.toRadians(player.getYRot());
+            horizontal = new Vec3(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+        }
+        horizontal = horizontal.normalize();
+        Vec3 right = horizontal.cross(new Vec3(0.0D, 1.0D, 0.0D)).normalize();
+        return player.position()
+                .add(horizontal.scale(0.68D))
+                .add(right.scale(0.12D))
+                .add(0.0D, 0.48D, 0.0D);
+    }
+
+    static ChargeSmokeBasis chargeSmokeBasis(Vec3 viewDirection) {
+        Vec3 forward = viewDirection.lengthSqr() < 1.0E-6D
+                ? new Vec3(0.0D, 0.0D, 1.0D)
+                : viewDirection.normalize();
+        Vec3 right = forward.cross(new Vec3(0.0D, 1.0D, 0.0D));
+        if (right.lengthSqr() < 1.0E-6D) {
+            right = forward.cross(new Vec3(1.0D, 0.0D, 0.0D));
+        }
+        right = right.normalize();
+        return new ChargeSmokeBasis(forward, right, right.cross(forward).normalize());
+    }
+
+    static double chargeSmokeScale(double maximumCharge) {
+        return maximumCharge <= 0.0D
+                ? 0.0D
+                : Math.sqrt(maximumCharge / 2.0D);
+    }
+
+    static double chargeSmokeMaximumReach(double maximumCharge) {
+        double scale = chargeSmokeScale(maximumCharge);
+        return scale <= 0.0D ? 0.0D : 1.6D + scale * 1.3D;
+    }
+
+    static double chargeSmokeMaximumRingRadius(double maximumCharge) {
+        double scale = chargeSmokeScale(maximumCharge);
+        return scale <= 0.0D ? 0.0D : 0.55D + scale * 0.75D;
+    }
+
+    static double chargeSmokeMaximumConeRadius(double maximumCharge) {
+        return chargeSmokeMaximumRingRadius(maximumCharge) * 1.35D;
+    }
+
+    static double chargeRingRemainingScale(double progress) {
+        double clamped = Mth.clamp(progress, 0.0D, 1.0D);
+        if (clamped <= CHARGE_RING_HOLD_PROGRESS) {
+            return 1.0D;
+        }
+        if (clamped <= CHARGE_CONE_START_PROGRESS) {
+            double stage = smoothstep((clamped - CHARGE_RING_HOLD_PROGRESS)
+                    / (CHARGE_CONE_START_PROGRESS - CHARGE_RING_HOLD_PROGRESS));
+            return Mth.lerp(
+                    stage, 1.0D, CHARGE_RING_SCALE_AT_CONE_START);
+        }
+        double stage = smoothstep((clamped - CHARGE_CONE_START_PROGRESS)
+                / (1.0D - CHARGE_CONE_START_PROGRESS));
+        return CHARGE_RING_SCALE_AT_CONE_START * (1.0D - stage);
+    }
+
+    static double chargeConeRemainingScale(double progress) {
+        double stage = Mth.clamp(
+                (progress - CHARGE_CONE_START_PROGRESS)
+                        / (1.0D - CHARGE_CONE_START_PROGRESS),
+                0.0D, 1.0D);
+        return 1.0D - smoothstep(stage);
+    }
+
+    static Vec3 chargeSmokeRingCenter(
+            Vec3 eye,
+            Vec3 foot,
+            Vec3 viewDirection,
+            double maximumCharge,
+            double progress) {
+        Vec3 forward = chargeSmokeBasis(viewDirection).forward;
+        Vec3 initial = eye.add(forward.scale(chargeSmokeMaximumReach(maximumCharge)));
+        return foot.add(initial.subtract(foot).scale(chargeRingRemainingScale(progress)));
+    }
+
+    static Vec3 chargeSmokeConeCenter(
+            Vec3 eye,
+            Vec3 foot,
+            Vec3 viewDirection,
+            double maximumCharge,
+            double progress) {
+        Vec3 forward = chargeSmokeBasis(viewDirection).forward;
+        Vec3 initial = eye.add(forward.scale(chargeSmokeMaximumReach(maximumCharge)));
+        return foot.add(initial.subtract(foot).scale(chargeConeRemainingScale(progress)));
+    }
+
+    static double chargeSmokeRingRadius(double maximumCharge, double progress) {
+        return chargeSmokeMaximumRingRadius(maximumCharge)
+                * chargeRingRemainingScale(progress);
+    }
+
+    static int chargeSmokeRingParticleCount(double maximumCharge) {
+        return maximumCharge <= 0.0D
+                ? 0
+                : 12 + Mth.ceil(chargeSmokeScale(maximumCharge) * 8.0D);
+    }
+
+    static int chargeSmokeConeParticleCount(double maximumCharge, double progress) {
+        if (maximumCharge <= 0.0D || progress < CHARGE_CONE_START_PROGRESS
+                || progress >= 1.0D) {
+            return 0;
+        }
+        double maximumCount = 2.0D + chargeSmokeScale(maximumCharge) * 2.6D;
+        return Math.max(1, Mth.ceil(maximumCount
+                * (0.35D + chargeConeRemainingScale(progress) * 0.65D)));
+    }
+
+    private static double smoothstep(double value) {
+        double clamped = Mth.clamp(value, 0.0D, 1.0D);
+        return clamped * clamped * (3.0D - 2.0D * clamped);
     }
 
     private static void emitKineticOverloadChargeParticles(
@@ -893,13 +1062,17 @@ public final class ClientKickState {
         }
     }
 
+    record ChargeSmokeBasis(Vec3 forward, Vec3 right, Vec3 up) {
+    }
+
     private static final class ChargeVisual {
-        private final long startedAt = gameTime();
         private float charge;
         private float maximum;
         private int level;
         private int kineticOverloadLevel;
+        private boolean initialRingPending = true;
         private boolean completionBurstPending;
+        private double lastFunnelEmissionProgress = -1.0D;
 
         private ChargeVisual(
                 float charge, float maximum, int level, int kineticOverloadLevel) {
