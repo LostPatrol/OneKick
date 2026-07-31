@@ -14,34 +14,34 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
 public final class ChargeSmokeParticle extends TextureSheetParticle {
+    static final double TRAVEL_DISTANCE_PER_TICK = 0.28D;
     private static SpriteSet registeredSprites;
     private final SpriteSet sprites;
-    private final Vec3 start;
     private final Vec3 fallbackTarget;
     private final int targetEntityId;
-    private final double startChargeProgress;
     private final boolean trackedCharge;
     private final float baseAlpha;
+    private final double initialDistance;
     private float motionProgress;
-    private int finishedTicks;
 
     private ChargeSmokeParticle(
             ClientLevel level,
             Vec3 start,
             Vec3 target,
             int targetEntityId,
-            double startChargeProgress,
             boolean trackedCharge,
             float size,
             SpriteSet sprites) {
         super(level, start.x, start.y, start.z);
         this.sprites = sprites;
-        this.start = start;
         this.fallbackTarget = target;
         this.targetEntityId = targetEntityId;
-        this.startChargeProgress = Mth.clamp(startChargeProgress, 0.0D, 1.0D);
         this.trackedCharge = trackedCharge;
-        this.lifetime = trackedCharge ? Integer.MAX_VALUE : 12;
+        this.initialDistance = Math.max(
+                TRAVEL_DISTANCE_PER_TICK, start.distanceTo(target));
+        this.lifetime = trackedCharge
+                ? Integer.MAX_VALUE
+                : Mth.ceil(this.initialDistance / TRAVEL_DISTANCE_PER_TICK) + 1;
         this.hasPhysics = false;
         this.quadSize = size * (0.88F + this.random.nextFloat() * 0.24F);
         this.baseAlpha = 0.72F + this.random.nextFloat() * 0.18F;
@@ -57,7 +57,6 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
             ClientLevel level,
             Player player,
             Vec3 point,
-            double chargeProgress,
             float size) {
         if (registeredSprites == null) {
             return;
@@ -67,7 +66,6 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
                 point,
                 ClientKickState.chargeSmokeFoot(player),
                 player.getId(),
-                chargeProgress,
                 true,
                 size,
                 registeredSprites));
@@ -80,40 +78,28 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
         this.zo = this.z;
         this.age++;
 
-        double chargeProgress;
         Vec3 target = this.fallbackTarget;
         if (this.trackedCharge) {
-            chargeProgress = ClientKickState.chargeSmokeProgress(this.targetEntityId);
             Entity entity = this.level.getEntity(this.targetEntityId);
-            if (chargeProgress < 0.0D || !(entity instanceof Player player)) {
+            if (!ClientKickState.isChargeSmokeActive(this.targetEntityId)
+                    || !(entity instanceof Player player)) {
                 this.remove();
                 return;
             }
             target = ClientKickState.chargeSmokeFoot(player);
-        } else {
-            chargeProgress = Mth.clamp((double) this.age / this.lifetime, 0.0D, 1.0D);
         }
 
-        double localProgress = (chargeProgress - this.startChargeProgress)
-                / Math.max(1.0E-6D, 1.0D - this.startChargeProgress);
-        this.motionProgress = (float) smoothstep(localProgress);
-        double remainingRatio = 1.0D - this.motionProgress;
-
-        Vec3 position = this.start.add(
-                target.subtract(this.start).scale(this.motionProgress));
-        this.setPos(position.x, position.y, position.z);
+        Vec3 next = nextPositionAtConstantSpeed(new Vec3(this.x, this.y, this.z), target);
+        double remainingDistance = next.distanceTo(target);
+        double remainingRatio = Mth.clamp(
+                remainingDistance / this.initialDistance, 0.0D, 1.0D);
+        this.motionProgress = (float) (1.0D - remainingRatio);
+        this.setPos(next.x, next.y, next.z);
         this.setSprite(this.sprites.get(
                 Mth.clamp(Mth.floor(this.motionProgress * 7.0F), 0, 7), 7));
         this.alpha = this.baseAlpha * (float) (0.34D + remainingRatio * 0.66D);
 
-        if (chargeProgress >= 1.0D
-                || !this.trackedCharge && this.motionProgress >= 1.0F) {
-            this.setPos(target.x, target.y, target.z);
-            this.alpha = this.baseAlpha * 0.18F;
-            if (this.finishedTicks++ >= 1) {
-                this.remove();
-            }
-        } else if (!this.trackedCharge && this.age >= this.lifetime) {
+        if (remainingDistance <= 1.0E-6D || this.age >= this.lifetime) {
             this.remove();
         }
     }
@@ -135,9 +121,13 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
         return ParticleRenderType.PARTICLE_SHEET_TRANSLUCENT;
     }
 
-    private static double smoothstep(double value) {
-        double clamped = Mth.clamp(value, 0.0D, 1.0D);
-        return clamped * clamped * (3.0D - 2.0D * clamped);
+    static Vec3 nextPositionAtConstantSpeed(Vec3 current, Vec3 target) {
+        Vec3 offset = target.subtract(current);
+        double distance = offset.length();
+        if (distance <= TRAVEL_DISTANCE_PER_TICK) {
+            return target;
+        }
+        return current.add(offset.scale(TRAVEL_DISTANCE_PER_TICK / distance));
     }
 
     public static final class Provider implements ParticleProvider<SimpleParticleType> {
@@ -164,7 +154,6 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
                     start,
                     start.add(targetOffsetX, targetOffsetY, targetOffsetZ),
                     -1,
-                    0.0D,
                     false,
                     0.22F,
                     this.sprites);

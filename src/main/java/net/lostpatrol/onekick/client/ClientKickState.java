@@ -381,10 +381,6 @@ public final class ClientKickState {
         if (chargeProgress >= 1.0D) {
             return;
         }
-        if (chargeProgress <= visual.lastFunnelEmissionProgress + 1.0E-6D) {
-            return;
-        }
-        visual.lastFunnelEmissionProgress = chargeProgress;
         emitChargeFunnel(
                 level, player, eye, foot, basis, visual.maximum, chargeProgress);
     }
@@ -416,17 +412,13 @@ public final class ClientKickState {
                     .add(funnelAxis.scale(axial))
                     .add(basis.right.scale(Math.cos(angle) * crossSection))
                     .add(basis.up.scale(Math.sin(angle) * crossSection));
-            ChargeSmokeParticle.spawnFunnel(
-                    level, player, point, chargeProgress, particleSize);
+            ChargeSmokeParticle.spawnFunnel(level, player, point, particleSize);
         }
     }
 
-    static double chargeSmokeProgress(int entityId) {
+    static boolean isChargeSmokeActive(int entityId) {
         ChargeVisual visual = CHARGING_PLAYERS.get(entityId);
-        if (visual == null || visual.maximum <= 0.0F) {
-            return -1.0D;
-        }
-        return Mth.clamp(visual.charge / visual.maximum, 0.0F, 1.0F);
+        return visual != null && visual.maximum > 0.0F;
     }
 
     static Vec3 chargeSmokeFoot(Player player) {
@@ -984,7 +976,6 @@ public final class ClientKickState {
         private int level;
         private int kineticOverloadLevel;
         private boolean completionBurstPending;
-        private double lastFunnelEmissionProgress = -1.0D;
 
         private ChargeVisual(
                 float charge, float maximum, int level, int kineticOverloadLevel) {
