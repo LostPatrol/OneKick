@@ -20,7 +20,6 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
     private final Vec3 fallbackTarget;
     private final int targetEntityId;
     private final double startChargeProgress;
-    private final boolean ringParticle;
     private final boolean trackedCharge;
     private final float baseAlpha;
     private float motionProgress;
@@ -32,7 +31,6 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
             Vec3 target,
             int targetEntityId,
             double startChargeProgress,
-            boolean ringParticle,
             boolean trackedCharge,
             float size,
             SpriteSet sprites) {
@@ -42,7 +40,6 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
         this.fallbackTarget = target;
         this.targetEntityId = targetEntityId;
         this.startChargeProgress = Mth.clamp(startChargeProgress, 0.0D, 1.0D);
-        this.ringParticle = ringParticle;
         this.trackedCharge = trackedCharge;
         this.lifetime = trackedCharge ? Integer.MAX_VALUE : 12;
         this.hasPhysics = false;
@@ -56,30 +53,11 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
         this.setSprite(this.sprites.get(0, 7));
     }
 
-    static void spawnRing(
-            ClientLevel level,
-            Player player,
-            Vec3 point,
-            double chargeProgress,
-            float size) {
-        spawn(level, player, point, chargeProgress, true, size);
-    }
-
     static void spawnFunnel(
             ClientLevel level,
             Player player,
             Vec3 point,
             double chargeProgress,
-            float size) {
-        spawn(level, player, point, chargeProgress, false, size);
-    }
-
-    private static void spawn(
-            ClientLevel level,
-            Player player,
-            Vec3 point,
-            double chargeProgress,
-            boolean ringParticle,
             float size) {
         if (registeredSprites == null) {
             return;
@@ -90,7 +68,6 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
                 ClientKickState.chargeSmokeFoot(player),
                 player.getId(),
                 chargeProgress,
-                ringParticle,
                 true,
                 size,
                 registeredSprites));
@@ -117,21 +94,10 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
             chargeProgress = Mth.clamp((double) this.age / this.lifetime, 0.0D, 1.0D);
         }
 
-        double remainingRatio;
-        if (this.ringParticle) {
-            double startingRemaining = ClientKickState.chargeRingRemainingScale(
-                    this.startChargeProgress);
-            remainingRatio = startingRemaining <= 1.0E-6D
-                    ? 0.0D
-                    : ClientKickState.chargeRingRemainingScale(chargeProgress)
-                            / startingRemaining;
-            this.motionProgress = (float) Mth.clamp(1.0D - remainingRatio, 0.0D, 1.0D);
-        } else {
-            double localProgress = (chargeProgress - this.startChargeProgress)
-                    / Math.max(1.0E-6D, 1.0D - this.startChargeProgress);
-            this.motionProgress = (float) smoothstep(localProgress);
-            remainingRatio = 1.0D - this.motionProgress;
-        }
+        double localProgress = (chargeProgress - this.startChargeProgress)
+                / Math.max(1.0E-6D, 1.0D - this.startChargeProgress);
+        this.motionProgress = (float) smoothstep(localProgress);
+        double remainingRatio = 1.0D - this.motionProgress;
 
         Vec3 position = this.start.add(
                 target.subtract(this.start).scale(this.motionProgress));
@@ -155,9 +121,7 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
     @Override
     public float getQuadSize(float partialTick) {
         float remaining = 1.0F - this.motionProgress;
-        float scale = this.ringParticle
-                ? 0.28F + remaining * 0.72F
-                : 0.52F + remaining * 0.48F;
+        float scale = 0.52F + remaining * 0.48F;
         return this.quadSize * scale;
     }
 
@@ -201,7 +165,6 @@ public final class ChargeSmokeParticle extends TextureSheetParticle {
                     start.add(targetOffsetX, targetOffsetY, targetOffsetZ),
                     -1,
                     0.0D,
-                    false,
                     false,
                     0.22F,
                     this.sprites);

@@ -39,9 +39,7 @@ public final class ClientKickState {
     private static final int MACH_RING_MIN_LAYERS = 2;
     private static final int MACH_RING_MAX_LAYERS = 6;
     private static final int MACH_RING_MAX_PREDICTION_TICKS = 512;
-    private static final double CHARGE_RING_HOLD_PROGRESS = 0.08D;
-    private static final double CHARGE_CONE_START_PROGRESS = 0.38D;
-    private static final double CHARGE_RING_SCALE_AT_CONE_START = 0.26D;
+    private static final int CHARGE_SMOKE_PARTICLE_MULTIPLIER = 3;
     private static final int UNSTABLE_EXPLOSION_LIFETIME_TICKS = 8;
     private static final ResourceLocation JUMP_BAR_BACKGROUND_SPRITE =
             ResourceLocation.withDefaultNamespace("hud/jump_bar_background");
@@ -385,15 +383,7 @@ public final class ClientKickState {
         ChargeSmokeBasis basis = chargeSmokeBasis(player.getLookAngle());
         Vec3 foot = chargeSmokeFoot(player);
         Vec3 eye = player.getEyePosition();
-        if (visual.initialRingPending && chargeProgress < 1.0D) {
-            visual.initialRingPending = false;
-            emitInitialChargeRing(
-                    level, player, eye, foot, basis, visual.maximum, chargeProgress);
-        }
         if (chargeProgress >= 1.0D) {
-            return;
-        }
-        if (chargeProgress < CHARGE_CONE_START_PROGRESS) {
             return;
         }
         if (chargeProgress <= visual.lastFunnelEmissionProgress + 1.0E-6D) {
@@ -402,31 +392,6 @@ public final class ClientKickState {
         visual.lastFunnelEmissionProgress = chargeProgress;
         emitChargeFunnel(
                 level, player, eye, foot, basis, visual.maximum, chargeProgress);
-    }
-
-    private static void emitInitialChargeRing(
-            ClientLevel level,
-            Player player,
-            Vec3 eye,
-            Vec3 foot,
-            ChargeSmokeBasis basis,
-            double maximumCharge,
-            double chargeProgress) {
-        double radius = chargeSmokeRingRadius(maximumCharge, chargeProgress);
-        Vec3 center = chargeSmokeRingCenter(
-                eye, foot, basis.forward, maximumCharge, chargeProgress);
-        int ringPoints = chargeSmokeRingParticleCount(maximumCharge);
-        float particleSize = (float) Mth.clamp(
-                0.22D + chargeSmokeScale(maximumCharge) * 0.055D,
-                0.24D, 0.42D);
-        for (int i = 0; i < ringPoints; i++) {
-            double angle = Mth.TWO_PI * i / ringPoints;
-            Vec3 point = center
-                    .add(basis.right.scale(Math.cos(angle) * radius))
-                    .add(basis.up.scale(Math.sin(angle) * radius));
-            ChargeSmokeParticle.spawnRing(
-                    level, player, point, chargeProgress, particleSize);
-        }
     }
 
     private static void emitChargeFunnel(
@@ -506,48 +471,13 @@ public final class ClientKickState {
         return scale <= 0.0D ? 0.0D : 1.6D + scale * 1.3D;
     }
 
-    static double chargeSmokeMaximumRingRadius(double maximumCharge) {
-        double scale = chargeSmokeScale(maximumCharge);
-        return scale <= 0.0D ? 0.0D : 0.55D + scale * 0.75D;
-    }
-
     static double chargeSmokeMaximumConeRadius(double maximumCharge) {
-        return chargeSmokeMaximumRingRadius(maximumCharge) * 1.35D;
-    }
-
-    static double chargeRingRemainingScale(double progress) {
-        double clamped = Mth.clamp(progress, 0.0D, 1.0D);
-        if (clamped <= CHARGE_RING_HOLD_PROGRESS) {
-            return 1.0D;
-        }
-        if (clamped <= CHARGE_CONE_START_PROGRESS) {
-            double stage = smoothstep((clamped - CHARGE_RING_HOLD_PROGRESS)
-                    / (CHARGE_CONE_START_PROGRESS - CHARGE_RING_HOLD_PROGRESS));
-            return Mth.lerp(
-                    stage, 1.0D, CHARGE_RING_SCALE_AT_CONE_START);
-        }
-        double stage = smoothstep((clamped - CHARGE_CONE_START_PROGRESS)
-                / (1.0D - CHARGE_CONE_START_PROGRESS));
-        return CHARGE_RING_SCALE_AT_CONE_START * (1.0D - stage);
+        double scale = chargeSmokeScale(maximumCharge);
+        return scale <= 0.0D ? 0.0D : (0.55D + scale * 0.75D) * 1.35D;
     }
 
     static double chargeConeRemainingScale(double progress) {
-        double stage = Mth.clamp(
-                (progress - CHARGE_CONE_START_PROGRESS)
-                        / (1.0D - CHARGE_CONE_START_PROGRESS),
-                0.0D, 1.0D);
-        return 1.0D - smoothstep(stage);
-    }
-
-    static Vec3 chargeSmokeRingCenter(
-            Vec3 eye,
-            Vec3 foot,
-            Vec3 viewDirection,
-            double maximumCharge,
-            double progress) {
-        Vec3 forward = chargeSmokeBasis(viewDirection).forward;
-        Vec3 initial = eye.add(forward.scale(chargeSmokeMaximumReach(maximumCharge)));
-        return foot.add(initial.subtract(foot).scale(chargeRingRemainingScale(progress)));
+        return 1.0D - smoothstep(progress);
     }
 
     static Vec3 chargeSmokeConeCenter(
@@ -561,24 +491,12 @@ public final class ClientKickState {
         return foot.add(initial.subtract(foot).scale(chargeConeRemainingScale(progress)));
     }
 
-    static double chargeSmokeRingRadius(double maximumCharge, double progress) {
-        return chargeSmokeMaximumRingRadius(maximumCharge)
-                * chargeRingRemainingScale(progress);
-    }
-
-    static int chargeSmokeRingParticleCount(double maximumCharge) {
-        return maximumCharge <= 0.0D
-                ? 0
-                : 12 + Mth.ceil(chargeSmokeScale(maximumCharge) * 8.0D);
-    }
-
     static int chargeSmokeConeParticleCount(double maximumCharge, double progress) {
-        if (maximumCharge <= 0.0D || progress < CHARGE_CONE_START_PROGRESS
-                || progress >= 1.0D) {
+        if (maximumCharge <= 0.0D || progress < 0.0D || progress >= 1.0D) {
             return 0;
         }
         double maximumCount = 2.0D + chargeSmokeScale(maximumCharge) * 2.6D;
-        return Math.max(1, Mth.ceil(maximumCount
+        return CHARGE_SMOKE_PARTICLE_MULTIPLIER * Math.max(1, Mth.ceil(maximumCount
                 * (0.35D + chargeConeRemainingScale(progress) * 0.65D)));
     }
 
@@ -1070,7 +988,6 @@ public final class ClientKickState {
         private float maximum;
         private int level;
         private int kineticOverloadLevel;
-        private boolean initialRingPending = true;
         private boolean completionBurstPending;
         private double lastFunnelEmissionProgress = -1.0D;
 
