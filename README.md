@@ -1,47 +1,112 @@
+<!--
+  Screenshot placeholders: search this file for IMAGE_PLACEHOLDER.
+  Drop PNG files at the listed paths under publish/assets/. Suggested
+  shots are in the HTML comment above each image. Language-specific
+  UI shots use publish/assets/en/ and publish/assets/zh/.
+-->
+
 # One Kick
 
-[简体中文](README_zh.md)
+[简体中文](README_zh.md) | English
 
-One Kick is a Minecraft Forge mod built around one simple idea: kick things.
 
-Press **R** to kick in the direction you are looking. The key can be changed in Minecraft's Controls menu. Your movement speed and boot quality affect kick strength, while a target's maximum health affects how far it is launched. A launched creature takes kinetic damage if it hits a wall.
 
-Boot enchantments expand the move:
+One Kick is a Minecraft Forge/NeoForge mod built around kicking. It adds a set of powerful, interlocking enchantments, flashy visuals, and a dedicated advancement tab.
 
-- **Reaction** and **Aerodynamics** turn kicks into movement tools.
-- **Charge** adds a hold-to-charge meter and trades food energy for power, consuming saturation before hunger just like normal movement. Its strength follows a quadratic curve, keeping brief charges gentle while high charge ramps up rapidly; the very rare **Overcharge** enchantment multiplies its maximum charge.
-- **Disintegration** and **Unstable Collision** break terrain or create explosions when a launched creature collides.
-- **Kinetic Overload** greatly raises speed and damage.
-- **Conservation of Angular Momentum** makes creatures kicked upward spin until they land.
-- Vanilla **Silk Touch** can be enchanted onto boots and preserves drops from kick-driven block destruction, unless the server's Kinetic Overload drop protection is active.
+Used well, one kick can send a pesky Warden flying, or shear the top off a mountain.
 
-The mod also includes a dedicated advancement tab with 13 milestones, ranging from a first kick to maximum charge, Mach-ring launches, large-scale destruction, and the fully enchanted **One Kick!**
 
-## Requirements
 
-- Minecraft 1.20.1
-- Minecraft Forge 47.4.10 or later in the 47.x series
-- Java 17
+<!-- IMAGE_PLACEHOLDER: publish/assets/common/hero.png -->
+<!-- Suggested shot: a fully enchanted kick launching a mob with Mach rings and a long particle trail. -->
+![A high-speed kick with Mach rings](publish/assets/common/hero.png)
 
-## Status
 
-The core gameplay is available in development builds. There is currently no published release.
 
-Charge stops at its enchantment-defined maximum, while **Overcharge I–II** multiplies that maximum by 2–3. Releasing a fully charged Charge V kick with Overcharge II costs about 35 food energy by itself. Charging consumes food energy separately, so even full saturation and hunger may not be enough to reach the maximum naturally. Launched creatures follow a server-controlled ballistic arc: stronger kicks keep the curve flatter and travel farther. The kick itself deals no damage; kinetic damage starts only when the creature later collides, while Disintegration can add damage during its forced traversal. Unstable Collision deals that kinetic impact damage uniformly throughout its blast area and does not knock entities back. If movement veers too far from the initial direction, both the trail and follow-up impact effects stop. Disintegration limits flying block debris to 64 entities per impact, but the current tuning build still leaves kick and terrain-destruction upper bounds uncapped, so back up test worlds before experimenting with extreme values.
+## Gameplay
 
-## Server drop protection
+### Kick
 
-Kinetic Overload block-drop protection is enabled by default. When enabled, any kick-driven terrain destruction from boots with **Kinetic Overload** suppresses block-item drops and debris landing drops, regardless of impact speed. Container contents still drop normally.
+1. Aim at a creature, a block, or the air
+2. Press R (default)
 
-Operators with permission level 2 can query or change it without restarting:
+### Mechanics
 
-```text
-/onekick kinetic_overload_drop_protection
-/onekick kinetic_overload_drop_protection true|false
-```
+Kick strength and launch speed are the core of this mod. They decide how hard a kick hits.
 
-The setting is persisted in the world's `serverconfig/onekick-server.toml` as `performance.suppressKineticOverloadBlockDrops`.
+Kick strength is computed from boot quality, player movement speed, charge, and special enchantments. Launch speed depends on kick speed, the target's maximum health, and knockback resistance.
 
-## License
+
+
+## Enchantments
+
+This mod adds a set of enchantments that can only go on boots. Vanilla Silk Touch can now also be enchanted onto boots. If the enchantment level is `N`, the effects are:
+
+| Enchantment | ID | Rarity | Max | Effect |
+| --- | --- | --- | ---: | --- |
+| Reaction | `onekick:reaction` | Common | 1 | Recoil proportional to kick power when kicking a creature or a block |
+| Aerodynamics | `onekick:aerodynamics` | Uncommon | 3 | Kick the air `N` times to produce recoil |
+| Charge | `onekick:charge` | Uncommon | 5 | Allows charged kicks; hold the key and spend hunger to charge |
+| Overcharge | `onekick:overcharge` | Very rare | 2 | Multiplies the charge cap by `N` |
+| Conservation of Angular Momentum | `onekick:angular_momentum` | Uncommon | 1 | Makes launched creatures spin |
+| Disintegration | `onekick:disintegration` | Uncommon | 1 | Breaks blocks when a kicked creature hits a wall |
+| Unstable Collision | `onekick:unstable_collision` | Very rare | 3 | Explodes on impact (does not break blocks on its own) |
+| Kinetic Overload | `onekick:kinetic_overload` | Very rare | 3 | Greatly increases kick speed, impact damage, and destruction |
+| Silk Touch (vanilla) | `minecraft:silk_touch` | — | 1 | Kick-broken blocks drop 100% of the time and are silk-touched |
+
++ Besides the hunger spent while charging, a charged kick spends extra hunger on release. If hunger is not enough at that moment, kick power is scaled down in proportion.
++ Some combinations drain hunger extremely fast. You may need to eat during the charge to reach full power.
++ Kinetic Overload has very high numbers. Any kick with it can become dangerous and destructive; be careful around your base.
+
+
+
+## Enchantment synergies
+
+All of the enchantments above can be combined in any way and still do their own jobs. Higher levels hit harder. None of them conflict, and they amplify each other. There are also these special synergies:
+
+| Combination | Effect |
+| --- | --- |
+| Disintegration + Kinetic Overload | Impact causes very long, large-scale block destruction |
+| Disintegration + Unstable Collision | The impact explosion breaks blocks using Unstable Collision's logic; Disintegration's own destruction is disabled |
+| Disintegration + Unstable Collision + Kinetic Overload | Impact causes very long, fairly wide large-scale block destruction and explosions |
+
+
+
+## Configuration and commands
+
+Commands require permission level 2.
+
+| Command | Effect |
+| --- | --- |
+| `/onekick kinetic_overload_drop_protection true` | Enable (destruction from Kinetic Overload kicks no longer drops items) |
+| `/onekick kinetic_overload_drop_protection false` | Disable (drops follow this mod's rules) |
+
+Commands immediately sync `performance.suppressKineticOverloadBlockDrops` in the server config file `serverconfig/onekick-server.toml`.
+
+Data packs and other mods can change these tags to configure this mod's effects:
+
+| Tag | Default contents | Used for |
+| --- | --- | --- |
+| `onekick:entity_types/kick_immune` | `minecraft:ender_dragon` | Cannot be launched |
+| `onekick:entity_types/flying` | allay, bat, bee, blaze, ender dragon, ghast, parrot, phantom, vex, wither | Cannot be spun by Conservation of Angular Momentum; vanilla `FlyingMob` / `FlyingAnimal` are also excluded |
+| `onekick:blocks/disintegration_immune` | `#minecraft:wither_immune` | Cannot be broken by kick destruction |
+| `onekick:blocks/disintegration_direct` | glass, glass pane, `#minecraft:leaves`, `#minecraft:wool` | Shatter in place; no flying debris |
+
+
+
+## Notes
+
++ Enchantment rarities have not been tuned yet, so this mod's enchantments may turn up too often or too rarely. Please report issues if you run into that.
++ This is an entertainment mod. Many values grow on a quadratic curve and are not balanced for vanilla survival; numbers can get out of hand.
+
+> [!WARNING]
+>
+> Kick strength and launch speed currently have no cap. This mod includes performance work for large-scale block destruction from Kinetic Overload, but behavior is not guaranteed on every setup—especially if enchantments are obtained above this mod's intended maximum levels by unusual means. Use caution.
+
+
+
+## Credits
+
+The core idea of this mod was inspired by part of https://www.bilibili.com/video/BV1m19YBuEjp/. Special thanks to the original authors: [@老丹Daniel](https://space.bilibili.com/26947053) and [@空栈不是空伐](https://space.bilibili.com/291397844). The features here are original implementations; only the concept was referenced.
 
 One Kick is available under the [MIT License](LICENSE).
