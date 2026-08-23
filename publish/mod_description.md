@@ -4,6 +4,10 @@ One Kick is a Minecraft Forge/NeoForge mod built around kicking. It adds a set o
 
 Used well, one kick can send a pesky Warden flying, or shear the top off a mountain.
 
+![Kicking a villager](https://raw.githubusercontent.com/LostPatrol/OneKick/1.21.1/publish/assets/common/kick_villager.gif)
+
+![Kicking a Warden](https://raw.githubusercontent.com/LostPatrol/OneKick/1.21.1/publish/assets/common/kick_warden.gif)
+
 ## Compatibility
 
 | Mod version | Minecraft | Loader | Java |

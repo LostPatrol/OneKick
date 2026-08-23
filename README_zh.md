@@ -1,10 +1,3 @@
-<!--
-  插图占位：在本文件中搜索 IMAGE_PLACEHOLDER。
-  把 PNG 放到 publish/assets/ 下对应路径即可。每张图上方的 HTML
-  注释写了建议镜头。界面截图按语言分开放在
-  publish/assets/en/ 与 publish/assets/zh/。
--->
-
 # One Kick
 
 简体中文 | [English](README.md)
@@ -17,9 +10,9 @@ One Kick 是一款围绕“踢”展开的 Minecraft Forge/Neoforge 模组，添
 
 
 
-<!-- IMAGE_PLACEHOLDER: publish/assets/common/hero.png -->
-<!-- 建议截图：完全体附魔踢击，生物高速飞出并带有马赫环与长拖尾。 -->
-![带有马赫环的高速踢击](publish/assets/common/hero.png)
+![踢飞村民](publish/assets/common/kick_villager.gif)
+
+![踢飞坚守者](publish/assets/common/kick_warden.gif)
 
 
 

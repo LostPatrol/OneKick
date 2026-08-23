@@ -1,10 +1,3 @@
-<!--
-  Screenshot placeholders: search this file for IMAGE_PLACEHOLDER.
-  Drop PNG files at the listed paths under publish/assets/. Suggested
-  shots are in the HTML comment above each image. Language-specific
-  UI shots use publish/assets/en/ and publish/assets/zh/.
--->
-
 # One Kick
 
 [简体中文](README_zh.md) | English
@@ -17,9 +10,9 @@ Used well, one kick can send a pesky Warden flying, or shear the top off a mount
 
 
 
-<!-- IMAGE_PLACEHOLDER: publish/assets/common/hero.png -->
-<!-- Suggested shot: a fully enchanted kick launching a mob with Mach rings and a long particle trail. -->
-![A high-speed kick with Mach rings](publish/assets/common/hero.png)
+![Kicking a villager](publish/assets/common/kick_villager.gif)
+
+![Kicking a Warden](publish/assets/common/kick_warden.gif)
 
 
 
