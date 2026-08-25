@@ -24,7 +24,7 @@ public final class KickNetwork {
     public static final byte ANIMATION_CHARGE = 0;
     public static final byte ANIMATION_KICK = 1;
     public static final byte ANIMATION_STOP = 2;
-    private static final String PROTOCOL = "6";
+    private static final String PROTOCOL = "7";
     private static final int MAX_DISINTEGRATION_SMOKE_ORIGINS = 256;
 
     private KickNetwork() {
@@ -48,6 +48,10 @@ public final class KickNetwork {
                 UnstableExplosionPacket.TYPE,
                 UnstableExplosionPacket.STREAM_CODEC,
                 ClientHandlers::handleUnstableExplosion);
+        registrar.playToClient(
+                PlayerImpulsePacket.TYPE,
+                PlayerImpulsePacket.STREAM_CODEC,
+                ClientHandlers::handlePlayerImpulse);
     }
 
     public static void sendInput(boolean pressed) {
@@ -133,6 +137,12 @@ public final class KickNetwork {
                 PacketDistributor.sendToPlayer(player, packet);
             }
         }
+    }
+
+    public static void sendPlayerImpulse(ServerPlayer player, Vec3 velocity) {
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(
+                player,
+                new PlayerImpulsePacket(player.getId(), velocity.x, velocity.y, velocity.z));
     }
 
     public static void broadcastUnstableExplosion(
@@ -235,6 +245,13 @@ public final class KickNetwork {
                 UnstableExplosionPacket packet, IPayloadContext context) {
             ClientKickState.emitUnstableExplosion(
                     new Vec3(packet.x(), packet.y(), packet.z()), packet.radius());
+        }
+
+        private static void handlePlayerImpulse(
+                PlayerImpulsePacket packet, IPayloadContext context) {
+            ClientKickState.applyPlayerImpulse(
+                    packet.entityId(),
+                    new Vec3(packet.x(), packet.y(), packet.z()));
         }
     }
 
@@ -456,6 +473,39 @@ public final class KickNetwork {
 
         @Override
         public Type<UnstableExplosionPacket> type() {
+            return TYPE;
+        }
+    }
+
+    private record PlayerImpulsePacket(
+            int entityId,
+            double x,
+            double y,
+            double z
+    ) implements CustomPacketPayload {
+        private static final Type<PlayerImpulsePacket> TYPE =
+                new Type<>(packetId("player_impulse"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, PlayerImpulsePacket>
+                STREAM_CODEC = StreamCodec.ofMember(
+                        PlayerImpulsePacket::encode, PlayerImpulsePacket::decode);
+
+        private void encode(RegistryFriendlyByteBuf buffer) {
+            buffer.writeVarInt(entityId);
+            buffer.writeDouble(x);
+            buffer.writeDouble(y);
+            buffer.writeDouble(z);
+        }
+
+        private static PlayerImpulsePacket decode(RegistryFriendlyByteBuf buffer) {
+            return new PlayerImpulsePacket(
+                    buffer.readVarInt(),
+                    buffer.readDouble(),
+                    buffer.readDouble(),
+                    buffer.readDouble());
+        }
+
+        @Override
+        public Type<PlayerImpulsePacket> type() {
             return TYPE;
         }
     }

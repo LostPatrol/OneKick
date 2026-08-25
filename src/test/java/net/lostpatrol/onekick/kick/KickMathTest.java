@@ -35,6 +35,60 @@ class KickMathTest {
     }
 
     @Test
+    void reactionAndAerodynamicsImpulsesMatchConfiguredCoefficients() {
+        assertEquals(0.44D, KickMath.blockReactionImpulse(1.0D), 1.0E-9D);
+        assertEquals(0.44D, KickMath.entityReactionImpulse(1.0D), 1.0E-9D);
+        assertEquals(0.50D, KickMath.aerodynamicsImpulse(1.0D), 1.0E-9D);
+        assertEquals(2.20D, KickMath.blockReactionImpulse(5.0D), 1.0E-9D);
+        assertEquals(2.20D, KickMath.entityReactionImpulse(5.0D), 1.0E-9D);
+        assertEquals(2.50D, KickMath.aerodynamicsImpulse(5.0D), 1.0E-9D);
+        assertEquals(0.0D, KickMath.blockReactionImpulse(-2.0D), 1.0E-9D);
+        assertEquals(0.0D, KickMath.entityReactionImpulse(Double.NaN), 1.0E-9D);
+        assertEquals(0.0D, KickMath.aerodynamicsImpulse(-1.0D), 1.0E-9D);
+    }
+
+    @Test
+    void reactionVelocityUsesTheFullLookDirectionIncludingVertical() {
+        Vec3 downward = KickMath.reactionVelocity(Vec3.ZERO, new Vec3(0.0D, -1.0D, 0.0D), 2.0D);
+        assertEquals(0.0D, downward.x, 1.0E-9D);
+        assertEquals(2.0D, downward.y, 1.0E-9D);
+        assertEquals(0.0D, downward.z, 1.0E-9D);
+
+        Vec3 upward = KickMath.reactionVelocity(Vec3.ZERO, new Vec3(0.0D, 1.0D, 0.0D), 2.0D);
+        assertEquals(0.0D, upward.x, 1.0E-9D);
+        assertEquals(-2.0D, upward.y, 1.0E-9D);
+        assertEquals(0.0D, upward.z, 1.0E-9D);
+
+        Vec3 diagonal = KickMath.reactionVelocity(
+                Vec3.ZERO, new Vec3(0.0D, 1.0D, 1.0D), 2.0D);
+        assertTrue(diagonal.y < 0.0D);
+        assertTrue(diagonal.z < 0.0D);
+        assertEquals(2.0D, diagonal.length(), 1.0E-9D);
+        assertEquals(
+                KickMath.entityReactionImpulse(1.0D) * -1.0D / Math.sqrt(2.0D),
+                KickMath.reactionVelocity(
+                        Vec3.ZERO, new Vec3(0.0D, 1.0D, 1.0D),
+                        KickMath.entityReactionImpulse(1.0D)).y,
+                1.0E-9D);
+    }
+
+    @Test
+    void reactionVelocityKeepsImpulsesAboveTheVanillaMotionPacketCap() {
+        Vec3 result = KickMath.reactionVelocity(
+                Vec3.ZERO, new Vec3(0.0D, -1.0D, 0.0D), 18.0D);
+        assertTrue(result.y > 3.9D);
+        assertEquals(18.0D, result.y, 1.0E-9D);
+    }
+
+    @Test
+    void aerodynamicsImpulseDoesNotScaleWithTheOldEnchantmentLevelCurve() {
+        double kickSpeed = 3.0D;
+        double oldLevelThree = kickSpeed * 0.16D * (1.0D + 3 * 0.15D);
+        assertEquals(kickSpeed * 0.50D, KickMath.aerodynamicsImpulse(kickSpeed), 1.0E-9D);
+        assertTrue(KickMath.aerodynamicsImpulse(kickSpeed) > oldLevelThree);
+    }
+
+    @Test
     void debugValuesAreNotUpperClampedButInvalidNegativeInputsStaySafe() {
         assertTrue(KickMath.calculateFinalSpeed(1000.0D, 1000.0D, 1000.0D, 99) > 20.0D);
         assertEquals(1.0D,

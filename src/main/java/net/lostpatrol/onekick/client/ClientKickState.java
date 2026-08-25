@@ -88,6 +88,18 @@ public final class ClientKickState {
         }
     }
 
+    public static void applyPlayerImpulse(int entityId, Vec3 velocity) {
+        Minecraft minecraft = Minecraft.getInstance();
+        Entity entity = minecraft.player != null && minecraft.player.getId() == entityId
+                ? minecraft.player
+                : minecraft.level == null ? null : minecraft.level.getEntity(entityId);
+        if (entity == null) {
+            return;
+        }
+        entity.setDeltaMovement(velocity);
+        entity.hasImpulse = true;
+    }
+
     public static void updatePlayerAnimation(int entityId, byte animation) {
         if (animation == KickNetwork.ANIMATION_STOP) {
             PLAYER_ANIMATIONS.remove(entityId);

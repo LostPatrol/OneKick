@@ -502,23 +502,17 @@ public final class KickManager {
     }
 
     private static void applyBlockReaction(ServerPlayer player, double kickSpeed) {
-        double reaction = Math.max(0.0D, kickSpeed * 0.22D);
-        player.setDeltaMovement(player.getDeltaMovement().add(player.getLookAngle().normalize().scale(-reaction)));
-        player.hurtMarked = true;
+        applyLookReaction(player, player.getLookAngle(), KickMath.blockReactionImpulse(kickSpeed));
     }
 
     private static void applyEntityReaction(ServerPlayer player, Vec3 look, double kickSpeed) {
-        Vec3 horizontal = new Vec3(look.x, 0.0D, look.z);
-        if (horizontal.lengthSqr() < 1.0E-5D) {
-            return;
-        }
-        horizontal = horizontal.normalize();
-        Vec3 movement = player.getDeltaMovement();
-        double forward = movement.dot(horizontal);
-        double reaction = Math.max(0.0D, kickSpeed * 0.14D);
-        double reduction = forward > 0.0D ? Math.min(forward, reaction) : reaction;
-        player.setDeltaMovement(movement.subtract(horizontal.scale(reduction)));
-        player.hurtMarked = true;
+        applyLookReaction(player, look, KickMath.entityReactionImpulse(kickSpeed));
+    }
+
+    private static void applyLookReaction(ServerPlayer player, Vec3 look, double impulse) {
+        Vec3 velocity = KickMath.reactionVelocity(player.getDeltaMovement(), look, impulse);
+        player.setDeltaMovement(velocity);
+        KickNetwork.sendPlayerImpulse(player, velocity);
     }
 
     private static void applyAerodynamics(
@@ -529,7 +523,7 @@ public final class KickManager {
         if (!player.onGround()) {
             state.airUses++;
         }
-        double reaction = Math.max(0.0D, kickSpeed * 0.16D * (1.0D + level * 0.15D));
+        double reaction = KickMath.aerodynamicsImpulse(kickSpeed);
         Vec3 push = player.getLookAngle().normalize().scale(-reaction);
         player.setDeltaMovement(player.getDeltaMovement().add(push));
         player.hurtMarked = true;

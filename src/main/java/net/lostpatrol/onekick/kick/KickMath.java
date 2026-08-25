@@ -30,6 +30,9 @@ public final class KickMath {
     private static final double UNSTABLE_EXPLOSION_MIN_VISUAL_RADIUS = 4.0D;
     private static final int DISINTEGRATION_SMOKE_PER_ORIGIN = 8;
     private static final int MAX_DISINTEGRATION_SMOKE_PARTICLES = 4096;
+    private static final double BLOCK_REACTION_COEFFICIENT = 0.44D;
+    private static final double ENTITY_REACTION_COEFFICIENT = 0.44D;
+    private static final double AERODYNAMICS_COEFFICIENT = 0.50D;
 
     private KickMath() {
     }
@@ -103,6 +106,26 @@ public final class KickMath {
     public static Vec3 launchDirection(Vec3 look) {
         Vec3 direction = look.lengthSqr() < 1.0E-8D ? new Vec3(0.0D, 0.0D, 1.0D) : look.normalize();
         return direction.add(0.0D, 0.12D, 0.0D).normalize();
+    }
+
+    public static double blockReactionImpulse(double kickSpeed) {
+        return nonNegative(kickSpeed) * BLOCK_REACTION_COEFFICIENT;
+    }
+
+    public static double entityReactionImpulse(double kickSpeed) {
+        return nonNegative(kickSpeed) * ENTITY_REACTION_COEFFICIENT;
+    }
+
+    public static double aerodynamicsImpulse(double kickSpeed) {
+        return nonNegative(kickSpeed) * AERODYNAMICS_COEFFICIENT;
+    }
+
+    public static Vec3 reactionVelocity(Vec3 current, Vec3 look, double impulse) {
+        Vec3 currentVelocity = current == null ? Vec3.ZERO : current;
+        Vec3 direction = look == null || look.lengthSqr() < 1.0E-8D
+                ? new Vec3(0.0D, 0.0D, 1.0D)
+                : look.normalize();
+        return currentVelocity.add(direction.scale(-nonNegative(impulse)));
     }
 
     public static Vec3 nextBallisticVelocity(Vec3 velocity, boolean submerged) {
