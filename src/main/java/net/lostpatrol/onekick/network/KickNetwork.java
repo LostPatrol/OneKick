@@ -26,7 +26,7 @@ public final class KickNetwork {
     public static final byte ANIMATION_CHARGE = 0;
     public static final byte ANIMATION_KICK = 1;
     public static final byte ANIMATION_STOP = 2;
-    private static final String PROTOCOL = "6";
+    private static final String PROTOCOL = "7";
     private static final int MAX_DISINTEGRATION_SMOKE_ORIGINS = 256;
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(OneKick.MOD_ID, "main"),
@@ -71,6 +71,12 @@ public final class KickNetwork {
                 .encoder(UnstableExplosionPacket::encode)
                 .decoder(UnstableExplosionPacket::decode)
                 .consumerMainThread(KickNetwork::handleUnstableExplosion)
+                .add();
+        CHANNEL.messageBuilder(
+                        PlayerImpulsePacket.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(PlayerImpulsePacket::encode)
+                .decoder(PlayerImpulsePacket::decode)
+                .consumerMainThread(KickNetwork::handlePlayerImpulse)
                 .add();
     }
 
@@ -153,6 +159,11 @@ public final class KickNetwork {
                 CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
             }
         }
+    }
+
+    public static void sendPlayerImpulse(ServerPlayer player, Vec3 velocity) {
+        CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> player),
+                new PlayerImpulsePacket(player.getId(), velocity.x, velocity.y, velocity.z));
     }
 
     public static void broadcastUnstableExplosion(
@@ -255,6 +266,15 @@ public final class KickNetwork {
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
                 ClientKickState.emitUnstableExplosion(
                         new Vec3(packet.x(), packet.y(), packet.z()), packet.radius()));
+    }
+
+    private static void handlePlayerImpulse(
+            PlayerImpulsePacket packet,
+            Supplier<NetworkEvent.Context> contextSupplier) {
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
+                ClientKickState.applyPlayerImpulse(
+                        packet.entityId(),
+                        new Vec3(packet.x(), packet.y(), packet.z())));
     }
 
     private record KickInputPacket(boolean pressed) {
@@ -393,6 +413,23 @@ public final class KickNetwork {
             return new UnstableExplosionPacket(
                     buffer.readDouble(), buffer.readDouble(),
                     buffer.readDouble(), buffer.readFloat());
+        }
+    }
+
+    private record PlayerImpulsePacket(int entityId, double x, double y, double z) {
+        private static void encode(PlayerImpulsePacket packet, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(packet.entityId);
+            buffer.writeDouble(packet.x);
+            buffer.writeDouble(packet.y);
+            buffer.writeDouble(packet.z);
+        }
+
+        private static PlayerImpulsePacket decode(FriendlyByteBuf buffer) {
+            return new PlayerImpulsePacket(
+                    buffer.readVarInt(),
+                    buffer.readDouble(),
+                    buffer.readDouble(),
+                    buffer.readDouble());
         }
     }
 }
