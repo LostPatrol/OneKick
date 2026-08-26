@@ -64,6 +64,39 @@ public final class KickGameTests {
     }
 
     @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void disintegrationKickDoesNotTraverseThroughBedrock(GameTestHelper helper) {
+        for (int x = 1; x <= 6; x++) {
+            for (int z = 1; z <= 3; z++) {
+                helper.setBlock(x, 2, z, Blocks.STONE);
+            }
+        }
+        for (int y = 2; y <= 5; y++) {
+            for (int z = 1; z <= 3; z++) {
+                helper.setBlock(7, y, z, Blocks.BEDROCK);
+                helper.setBlock(8, y, z, Blocks.STONE);
+            }
+        }
+        ServerPlayer attacker = registerSnapshotAttacker(helper);
+        Villager villager = helper.spawn(EntityType.VILLAGER, 2, 3, 2);
+        KickEnchantments enchantments = new KickEnchantments(0, 0, 1, 0, 0, 0, 0, 0, false);
+        KickSnapshot snapshot = new KickSnapshot(
+                attacker.getUUID(), 6.0D, enchantments, ItemStack.EMPTY);
+        Vec3 velocity = KickMath.launchDirection(new Vec3(1.0D, 0.0D, 0.0D)).scale(8.0D);
+        KickManager.startKickedMotion(villager, snapshot, velocity, false);
+
+        helper.runAtTickTime(15, () -> {
+            unregisterSnapshotAttacker(helper, attacker);
+            helper.assertTrue(villager.getX() < 7.0D,
+                    "Disintegration traversal phased through bedrock");
+            helper.assertTrue(villager.getX() > 2.0D,
+                    "Disintegration kick into bedrock did not move the target");
+            helper.assertTrue(helper.getBlockState(new BlockPos(8, 3, 2)).is(Blocks.STONE),
+                    "Disintegration destroyed stone behind a bedrock first impact");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "flight_room", timeoutTicks = 20)
     public static void customKickCriterionAwardsLoadedAdvancement(GameTestHelper helper) {
         ServerPlayer player = registerSnapshotAttacker(helper);
         Advancement advancement = helper.getLevel().getServer().getAdvancements().getAdvancement(

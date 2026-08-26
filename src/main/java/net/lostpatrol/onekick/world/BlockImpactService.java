@@ -501,6 +501,66 @@ public final class BlockImpactService {
                 && state.getDestroySpeed(level, pos) >= 0.0F;
     }
 
+    public static boolean blocksKickTraversal(ServerLevel level, Vec3 impact, Vec3 movement) {
+        Vec3 direction = movement.lengthSqr() < 1.0E-8D ? Vec3.ZERO : movement.normalize();
+        return blocksKickTraversal(level, BlockPos.containing(impact))
+                || blocksKickTraversal(level, BlockPos.containing(impact.add(direction.scale(0.05D))));
+    }
+
+    public static boolean wouldEnterKickImpassable(
+            ServerLevel level, LivingEntity entity, Vec3 movement) {
+        AABB swept = entity.getBoundingBox().expandTowards(movement).inflate(1.0E-6D);
+        int minX = Mth.floor(swept.minX);
+        int minY = Mth.floor(swept.minY);
+        int minZ = Mth.floor(swept.minZ);
+        int maxX = Mth.floor(swept.maxX);
+        int maxY = Mth.floor(swept.maxY);
+        int maxZ = Mth.floor(swept.maxZ);
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    cursor.set(x, y, z);
+                    if (!level.hasChunkAt(cursor) || level.isOutsideBuildHeight(cursor)) {
+                        continue;
+                    }
+                    BlockState state = level.getBlockState(cursor);
+                    if (!blocksKickTraversal(level, cursor, state)
+                            || state.getCollisionShape(level, cursor).isEmpty()) {
+                        continue;
+                    }
+                    AABB blockBounds = new AABB(cursor);
+                    if (swept.intersects(blockBounds)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    public static boolean blocksKickTraversal(ServerLevel level, BlockPos pos) {
+        if (!level.hasChunkAt(pos) || level.isOutsideBuildHeight(pos)) {
+            return false;
+        }
+        return blocksKickTraversal(level, pos, level.getBlockState(pos));
+    }
+
+    public static boolean blocksKickTraversal(
+            ServerLevel level, BlockPos pos, BlockState state) {
+        return blocksKickTraversal(
+                state.isAir(),
+                state.getDestroySpeed(level, pos),
+                state.is(ModTags.DISINTEGRATION_IMMUNE));
+    }
+
+    static boolean blocksKickTraversal(boolean air, float destroySpeed, boolean impassableTag) {
+        if (air) {
+            return false;
+        }
+        return destroySpeed < 0.0F || impassableTag;
+    }
+
     private static void removeBlock(
             ServerLevel level,
             BlockPos pos,
