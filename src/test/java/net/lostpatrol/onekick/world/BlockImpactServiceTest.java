@@ -1,6 +1,7 @@
 package net.lostpatrol.onekick.world;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Random;
 import net.minecraft.world.phys.Vec3;
@@ -25,5 +26,15 @@ class BlockImpactServiceTest {
             assertEquals(expected, BlockImpactService.perpendicularDistance(
                     relative.x, relative.y, relative.z, axis, along));
         }
+    }
+
+    @Test
+    void traversalBlockingUsesHardnessAndImpassableTag() {
+        assertTrue(!BlockImpactService.blocksKickTraversal(true, -1.0F, true));
+        assertTrue(!BlockImpactService.blocksKickTraversal(true, 1.5F, false));
+        assertTrue(BlockImpactService.blocksKickTraversal(false, -1.0F, false));
+        assertTrue(BlockImpactService.blocksKickTraversal(false, 50.0F, true));
+        assertTrue(!BlockImpactService.blocksKickTraversal(false, 1.5F, false));
+        assertTrue(!BlockImpactService.blocksKickTraversal(false, 50.0F, false));
     }
 }

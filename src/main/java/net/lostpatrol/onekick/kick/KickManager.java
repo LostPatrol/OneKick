@@ -207,13 +207,15 @@ public final class KickManager {
                     ? findCurrentBlockImpact(level, entity, flightVelocity, actualMovement)
                     : firstBlockImpact.location()
                     : entityCollision.getBoundingBox().getCenter();
-            BlockImpactService.handleImpact(level, entity, impact, flightVelocity,
-                    state.initialVelocity.length(), damage, state.snapshot);
             KickEnchantments enchantments = state.snapshot.enchantments();
-            if (entity.isAlive()
-                    && (enchantments.disintegration() > 0 || enchantments.unstableCollision() > 0)) {
-                startTraversal(entity, state, flightVelocity, beforeSpeed);
-                return;
+            if (!BlockImpactService.blocksKickTraversal(level, impact, flightVelocity)) {
+                BlockImpactService.handleImpact(level, entity, impact, flightVelocity,
+                        state.initialVelocity.length(), damage, state.snapshot);
+                if (entity.isAlive()
+                        && (enchantments.disintegration() > 0 || enchantments.unstableCollision() > 0)) {
+                    startTraversal(entity, state, flightVelocity, beforeSpeed);
+                    return;
+                }
             }
             haltControlledMotion(entity);
             stopTracking(entity);
@@ -426,6 +428,17 @@ public final class KickManager {
 
         double forcedSpeed = Math.min(state.traversalSpeed, state.traversalRemaining);
         Vec3 forcedVelocity = state.traversalDirection.scale(forcedSpeed);
+        if (BlockImpactService.wouldEnterKickImpassable(level, entity, forcedVelocity)) {
+            int overloadLevel = state.snapshot.enchantments().kineticOverload();
+            float damage = KickMath.collisionDamage(state.traversalSpeed, 0.0D, overloadLevel);
+            if (damage > 0.0F
+                    && entity.hurt(level.damageSources().flyIntoWall(), damage)) {
+                recordKickDamage(level, state, damage);
+            }
+            haltControlledMotion(entity);
+            stopTracking(entity);
+            return;
+        }
         BlockPos nextPosition = BlockPos.containing(currentPosition.add(forcedVelocity));
         if (!level.hasChunkAt(nextPosition)) {
             haltControlledMotion(entity);
