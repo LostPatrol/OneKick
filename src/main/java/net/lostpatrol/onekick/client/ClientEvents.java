@@ -1,3 +1,4 @@
+/** Client event wiring for controls, visual effects, and optional renderer compatibility. */
 package net.lostpatrol.onekick.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
@@ -5,6 +6,7 @@ import com.mojang.math.Axis;
 import java.util.HashSet;
 import java.util.Set;
 import net.lostpatrol.onekick.OneKick;
+import net.lostpatrol.onekick.client.compat.PalCompatibility;
 import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModEntityTypes;
 import net.lostpatrol.onekick.registry.ModParticleTypes;
@@ -19,7 +21,9 @@ import net.neoforged.fml.util.ObfuscationReflectionHelper;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
@@ -35,6 +39,7 @@ import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import org.lwjgl.glfw.GLFW;
 
 public final class ClientEvents {
+    private static final String PAL_MOD_ID = "player_animation_library";
     private static final KeyMapping KICK_KEY = new KeyMapping(
             "key.onekick.kick",
             KeyConflictContext.IN_GAME,
@@ -76,9 +81,21 @@ public final class ClientEvents {
                     UnstableExplosionParticle.Provider::new);
         }
 
+        /** Registers PAL-only code after all mods have been discovered. */
+        @SubscribeEvent
+        public static void clientSetup(FMLClientSetupEvent event) {
+            if (ModList.get().isLoaded(PAL_MOD_ID)) {
+                event.enqueueWork(PalCompatibility::register);
+            }
+        }
+
         @SubscribeEvent
         public static void replacePlayerModels(EntityRenderersEvent.AddLayers event) {
             FirstPersonKickRenderer.initialize();
+            // PAL must retain the vanilla PlayerModel so its setupAnim injection remains reachable.
+            if (ModList.get().isLoaded(PAL_MOD_ID)) {
+                return;
+            }
             for (PlayerSkin.Model skin : event.getSkins()) {
                 if (event.getSkin(skin) instanceof PlayerRenderer renderer) {
                     boolean slim = skin == PlayerSkin.Model.SLIM;
