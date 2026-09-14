@@ -1,8 +1,10 @@
+/** Renders One Kick's first-person leg with an optional custom-model bridge. */
 package net.lostpatrol.onekick.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.EnumSet;
 import java.util.Set;
+import net.lostpatrol.onekick.client.compat.CpmCompatibility;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.model.geom.PartPose;
@@ -18,8 +20,10 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.player.PlayerModelPart;
 import net.minecraftforge.client.event.RenderHandEvent;
+import net.minecraftforge.fml.ModList;
 
 final class FirstPersonKickRenderer {
+    private static final String CPM_MOD_ID = "cpm";
     private static final int VISIBLE_LEG_START = 5;
     private static final Set<Direction> VISIBLE_FACES =
             EnumSet.complementOf(EnumSet.of(Direction.DOWN));
@@ -53,6 +57,12 @@ final class FirstPersonKickRenderer {
         if (leg == null || pants == null || player == null || player.isInvisible()
                 || player.isSpectator() || !minecraft.options.getCameraType().isFirstPerson()) {
             return false;
+        }
+
+        // Do not resolve optional CPM classes unless the mod is actually present.
+        if (ModList.get().isLoaded(CPM_MOD_ID)
+                && CpmCompatibility.renderFirstPersonLeg(event, player)) {
+            return true;
         }
 
         leg.resetPose();

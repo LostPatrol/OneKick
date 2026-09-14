@@ -1,3 +1,4 @@
+/** Client event wiring for controls, visual effects, and optional renderer compatibility. */
 package net.lostpatrol.onekick.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
@@ -5,6 +6,7 @@ import com.mojang.math.Axis;
 import java.util.HashSet;
 import java.util.Set;
 import net.lostpatrol.onekick.OneKick;
+import net.lostpatrol.onekick.client.compat.CpmCompatibility;
 import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModEntityTypes;
 import net.lostpatrol.onekick.registry.ModParticleTypes;
@@ -27,10 +29,13 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.event.lifecycle.InterModEnqueueEvent;
 import org.lwjgl.glfw.GLFW;
 
 public final class ClientEvents {
+    private static final String CPM_MOD_ID = "cpm";
     private static final KeyMapping KICK_KEY = new KeyMapping(
             "key.onekick.kick",
             KeyConflictContext.IN_GAME,
@@ -70,6 +75,14 @@ public final class ClientEvents {
                     ChargeSmokeParticle.Provider::new);
             event.registerSpriteSet(ModParticleTypes.UNSTABLE_EXPLOSION.get(),
                     UnstableExplosionParticle.Provider::new);
+        }
+
+        /** Offers the isolated renderer bridge to CPM only when CPM is installed. */
+        @SubscribeEvent
+        public static void enqueueInterModCommunication(InterModEnqueueEvent event) {
+            if (ModList.get().isLoaded(CPM_MOD_ID)) {
+                CpmCompatibility.enqueuePlugin();
+            }
         }
 
         @SubscribeEvent
