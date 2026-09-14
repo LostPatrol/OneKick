@@ -6,6 +6,7 @@ import com.mojang.math.Axis;
 import java.util.HashSet;
 import java.util.Set;
 import net.lostpatrol.onekick.OneKick;
+import net.lostpatrol.onekick.client.compat.CpmCompatibility;
 import net.lostpatrol.onekick.client.compat.PalCompatibility;
 import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModEntityTypes;
@@ -24,6 +25,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.fml.event.lifecycle.InterModEnqueueEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
@@ -40,6 +42,7 @@ import org.lwjgl.glfw.GLFW;
 
 public final class ClientEvents {
     private static final String PAL_MOD_ID = "player_animation_library";
+    private static final String CPM_MOD_ID = "cpm";
     private static final KeyMapping KICK_KEY = new KeyMapping(
             "key.onekick.kick",
             KeyConflictContext.IN_GAME,
@@ -86,6 +89,14 @@ public final class ClientEvents {
         public static void clientSetup(FMLClientSetupEvent event) {
             if (ModList.get().isLoaded(PAL_MOD_ID)) {
                 event.enqueueWork(PalCompatibility::register);
+            }
+        }
+
+        /** Offers the isolated renderer bridge to CPM only when CPM is installed. */
+        @SubscribeEvent
+        public static void enqueueInterModCommunication(InterModEnqueueEvent event) {
+            if (ModList.get().isLoaded(CPM_MOD_ID)) {
+                CpmCompatibility.enqueuePlugin();
             }
         }
 

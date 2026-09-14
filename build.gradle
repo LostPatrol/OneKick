@@ -30,6 +30,10 @@ repositories {
     maven {
         url = 'https://repo.redlance.org/public'
     }
+    // Customizable Player Models publishes its stable integration API here.
+    maven {
+        url = 'https://raw.githubusercontent.com/tom5454/maven/main'
+    }
 }
 
 base {
@@ -105,6 +109,8 @@ dependencies {
     implementation "net.neoforged:neoforge:${neo_version}"
     // Optional at runtime: PAL classes are only loaded after its mod id is detected.
     compileOnly "com.zigythebird.playeranim:PlayerAnimationLibNeo:${pal_version}"
+    // Optional at runtime: CPM classes are isolated behind a loaded-mod guard.
+    compileOnly "com.tom5454.cpm:CustomPlayerModels-API:${cpm_api_version}"
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
 
