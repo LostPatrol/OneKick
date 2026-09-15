@@ -13,13 +13,15 @@
 - During another PAL animation's first-person model pass, One Kick's first-person leg
   is intentionally not rendered. This prevents the player's head/body from appearing
   inside the camera and is the accepted compatibility tradeoff.
+- Customizable Player Models 0.6.27 is an optional, compile-only client integration.
+  First- and third-person kicks support geometry assigned to CPM's standard `RIGHT_LEG`
+  root, including models that disable vanilla limb animation. The no-CPM and CPM-with-
+  vanilla-model paths retain One Kick's established renderer.
 
 ## Known risk
 
 - The PAL bridge is compiled against PAL 1.1.6 for Minecraft 1.21.1. A future PAL
   release that breaks its factory, animation, or bone APIs will require a bridge update;
   installations without PAL remain isolated from this risk.
-- CPM can be installed while the player uses a vanilla model; that configuration keeps
-  One Kick's normal first- and third-person animation path. CPM models which replace or
-  disable vanilla limb animation are unsupported because CPM's public API cannot safely
-  identify and override arbitrary custom leg geometry.
+- CPM geometry assigned outside the standard `RIGHT_LEG` root is intentionally outside
+  the compatibility scope; One Kick does not infer which arbitrary custom part is a leg.

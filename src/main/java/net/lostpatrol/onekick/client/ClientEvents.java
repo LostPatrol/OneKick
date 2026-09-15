@@ -6,12 +6,15 @@ import com.mojang.math.Axis;
 import java.util.HashSet;
 import java.util.Set;
 import net.lostpatrol.onekick.OneKick;
+import net.lostpatrol.onekick.client.compat.CpmCompatibility;
+import net.lostpatrol.onekick.client.compat.CpmKickLayer;
 import net.lostpatrol.onekick.client.compat.PalCompatibility;
 import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModEntityTypes;
 import net.lostpatrol.onekick.registry.ModParticleTypes;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.resources.PlayerSkin;
 import net.minecraft.client.renderer.entity.FallingBlockRenderer;
@@ -24,6 +27,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.fml.event.lifecycle.InterModEnqueueEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
@@ -33,6 +37,7 @@ import net.neoforged.neoforge.client.event.RenderFrameEvent;
 import net.neoforged.neoforge.client.event.RenderGuiLayerEvent;
 import net.neoforged.neoforge.client.event.RenderHandEvent;
 import net.neoforged.neoforge.client.event.RenderLivingEvent;
+import net.neoforged.neoforge.client.event.RenderPlayerEvent;
 import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 import net.neoforged.neoforge.client.settings.KeyConflictContext;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
@@ -40,6 +45,7 @@ import org.lwjgl.glfw.GLFW;
 
 public final class ClientEvents {
     private static final String PAL_MOD_ID = "player_animation_library";
+    private static final String CPM_MOD_ID = "cpm";
     private static final KeyMapping KICK_KEY = new KeyMapping(
             "key.onekick.kick",
             KeyConflictContext.IN_GAME,
@@ -89,6 +95,14 @@ public final class ClientEvents {
             }
         }
 
+        /** Offers the isolated standard-limb renderer to CPM when the mod is installed. */
+        @SubscribeEvent
+        public static void enqueueInterModCommunication(InterModEnqueueEvent event) {
+            if (ModList.get().isLoaded(CPM_MOD_ID)) {
+                CpmCompatibility.enqueuePlugin();
+            }
+        }
+
         @SubscribeEvent
         public static void replacePlayerModels(EntityRenderersEvent.AddLayers event) {
             FirstPersonKickRenderer.initialize();
@@ -105,6 +119,9 @@ public final class ClientEvents {
                             new KickPlayerModel(event.getEntityModels().bakeLayer(
                                     slim ? ModelLayers.PLAYER_SLIM : ModelLayers.PLAYER), slim),
                             "model");
+                    if (ModList.get().isLoaded(CPM_MOD_ID)) {
+                        renderer.addLayer(new CpmKickLayer(renderer));
+                    }
                 }
             }
         }
@@ -131,7 +148,38 @@ public final class ClientEvents {
 
         @SubscribeEvent
         public static void renderTick(RenderFrameEvent.Pre event) {
+            if (ModList.get().isLoaded(CPM_MOD_ID)) {
+                CpmCompatibility.cleanupThirdPerson();
+            }
             firstPersonLegRendered = false;
+        }
+
+        /** Prepares a CPM replacement for the standard right-leg root before body rendering. */
+        @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
+        public static void beforePlayerRender(RenderPlayerEvent.Pre event) {
+            if (!ModList.get().isLoaded(CPM_MOD_ID)
+                    || ModList.get().isLoaded(PAL_MOD_ID)) {
+                return;
+            }
+            if (event.isCanceled()) {
+                CpmCompatibility.cleanupThirdPerson();
+                return;
+            }
+            if (event.getEntity() instanceof AbstractClientPlayer player) {
+                CpmCompatibility.beginThirdPerson(
+                        player,
+                        event.getRenderer().getModel(),
+                        event.getMultiBufferSource(),
+                        event.getPartialTick());
+            }
+        }
+
+        /** Cleans up if the replacement layer did not complete the render for any reason. */
+        @SubscribeEvent(priority = EventPriority.HIGHEST)
+        public static void afterPlayerRender(RenderPlayerEvent.Post event) {
+            if (ModList.get().isLoaded(CPM_MOD_ID)) {
+                CpmCompatibility.cleanupThirdPerson();
+            }
         }
 
         @SubscribeEvent
@@ -186,6 +234,9 @@ public final class ClientEvents {
             keyWasDown = false;
             firstPersonLegRendered = false;
             SPIN_POSES.clear();
+            if (ModList.get().isLoaded(CPM_MOD_ID)) {
+                CpmCompatibility.cleanupThirdPerson();
+            }
             ClientKickState.clear();
         }
 
