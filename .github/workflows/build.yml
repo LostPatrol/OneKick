@@ -1,0 +1,40 @@
+# Build branch artifacts on changes or on demand for the end-to-end release skill.
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ startsWith(github.base_ref || github.ref_name, '1.20.1') && '17' || '21' }}
+          distribution: temurin
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew build
+
+      - name: Upload production jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: onekick-${{ github.run_id }}
+          path: build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 7
