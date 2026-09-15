@@ -1,4 +1,4 @@
-/** Renders One Kick's first-person leg with an optional custom-model bridge. */
+/** Renders One Kick's first-person leg with an optional standard CPM right-leg bridge. */
 package net.lostpatrol.onekick.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;

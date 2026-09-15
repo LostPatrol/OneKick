@@ -6,12 +6,11 @@
 - One Kick 1.20.1-0.1.2 uses its existing `KickPlayerModel` replacement for
   third-person animation and its `RenderHandEvent` renderer for first-person kicks.
 - Customizable Player Models 0.6.27 is an optional, compile-only client integration.
-  When CPM is present, its supported rendering API supplies the custom right-leg mesh
-  and texture for the first-person kick; without CPM, the original vanilla-skin
-  renderer executes unchanged.
+  First- and third-person kicks support geometry assigned to CPM's standard `RIGHT_LEG`
+  root, including models that disable vanilla limb animation. The no-CPM and CPM-with-
+  vanilla-model paths retain One Kick's established renderer.
 
 ## Known risk
 
-- The CPM bridge intentionally renders only the right-leg root in
-  `AnimationMode.HAND`. Unusual models that attach kick-visible geometry outside that
-  root remain a manual compatibility edge case.
+- CPM geometry assigned outside the standard `RIGHT_LEG` root is intentionally outside
+  the compatibility scope; One Kick does not infer which arbitrary custom part is a leg.

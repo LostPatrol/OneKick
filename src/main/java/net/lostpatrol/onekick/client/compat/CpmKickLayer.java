@@ -1,0 +1,32 @@
+/** Draws a prepared CPM standard right leg after the player's normal layers. */
+package net.lostpatrol.onekick.client.compat;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.model.PlayerModel;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.entity.RenderLayerParent;
+import net.minecraft.client.renderer.entity.layers.RenderLayer;
+
+public final class CpmKickLayer
+        extends RenderLayer<AbstractClientPlayer, PlayerModel<AbstractClientPlayer>> {
+    public CpmKickLayer(
+            RenderLayerParent<AbstractClientPlayer, PlayerModel<AbstractClientPlayer>> renderer) {
+        super(renderer);
+    }
+
+    @Override
+    public void render(
+            PoseStack poseStack,
+            MultiBufferSource buffers,
+            int packedLight,
+            AbstractClientPlayer player,
+            float limbSwing,
+            float limbSwingAmount,
+            float partialTick,
+            float ageInTicks,
+            float netHeadYaw,
+            float headPitch) {
+        CpmCompatibility.renderThirdPerson(poseStack, buffers, packedLight, player);
+    }
+}
