@@ -27,8 +27,12 @@ run-data
 forge*changelog.txt
 
 AGENTS.md
-agents
-.agents
+/agent/
+/MEMORY.md
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/onekick-release/
 codex
 grok
 
