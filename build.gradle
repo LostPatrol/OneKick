@@ -1,3 +1,4 @@
+// Builds One Kick for NeoForge, including the player-model access transformer.
 plugins {
     id 'java-library'
     id 'maven-publish'
@@ -42,6 +43,13 @@ base {
 
 // Mojang ships Java 21 to end users in 1.21.1, so mods should target Java 21.
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+// Apply the same field access during compilation that NeoForge loads from the mod JAR.
+minecraft {
+    accessTransformers {
+        file('src/main/resources/META-INF/accesstransformer.cfg')
+    }
+}
 
 // Default run configurations.
 // These can be tweaked, removed, or duplicated as needed.

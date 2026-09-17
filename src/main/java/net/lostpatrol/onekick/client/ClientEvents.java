@@ -18,9 +18,7 @@ import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.resources.PlayerSkin;
 import net.minecraft.client.renderer.entity.FallingBlockRenderer;
-import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.player.PlayerRenderer;
-import net.neoforged.fml.util.ObfuscationReflectionHelper;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -103,6 +101,7 @@ public final class ClientEvents {
             }
         }
 
+        /** Installs the AT-accessible kick model and CPM layer only on the existing non-PAL path. */
         @SubscribeEvent
         public static void replacePlayerModels(EntityRenderersEvent.AddLayers event) {
             FirstPersonKickRenderer.initialize();
@@ -113,12 +112,8 @@ public final class ClientEvents {
             for (PlayerSkin.Model skin : event.getSkins()) {
                 if (event.getSkin(skin) instanceof PlayerRenderer renderer) {
                     boolean slim = skin == PlayerSkin.Model.SLIM;
-                    ObfuscationReflectionHelper.setPrivateValue(
-                            LivingEntityRenderer.class,
-                            renderer,
-                            new KickPlayerModel(event.getEntityModels().bakeLayer(
-                                    slim ? ModelLayers.PLAYER_SLIM : ModelLayers.PLAYER), slim),
-                            "model");
+                    renderer.model = new KickPlayerModel(event.getEntityModels().bakeLayer(
+                            slim ? ModelLayers.PLAYER_SLIM : ModelLayers.PLAYER), slim);
                     if (ModList.get().isLoaded(CPM_MOD_ID)) {
                         renderer.addLayer(new CpmKickLayer(renderer));
                     }
