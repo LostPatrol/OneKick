@@ -1,4 +1,4 @@
-/** Renders One Kick's first-person leg with an optional standard CPM right-leg bridge. */
+/** Renders the optional CPM or vanilla first-person leg, suppressed when YSM is installed. */
 package net.lostpatrol.onekick.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -23,16 +23,23 @@ import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.fml.ModList;
 
 final class FirstPersonKickRenderer {
+    // YSM owns custom player geometry; suppress all One Kick first-person leg paths.
+    private static final String YSM_MOD_ID = "yes_steve_model";
+    // Optional CPM integration identifier.
     private static final String CPM_MOD_ID = "cpm";
+    // Hide the upper five pixels of the vanilla leg in first person.
     private static final int VISIBLE_LEG_START = 5;
+    // Omit the bottom face to retain the established first-person silhouette.
     private static final Set<Direction> VISIBLE_FACES =
             EnumSet.complementOf(EnumSet.of(Direction.DOWN));
-    private static ModelPart leg;
-    private static ModelPart pants;
+    private static ModelPart leg; // Baked vanilla leg geometry.
+    private static ModelPart pants; // Baked outer skin layer.
 
+    /** Prevents instantiation of the shared renderer. */
     private FirstPersonKickRenderer() {
     }
 
+    /** Bakes the vanilla fallback leg and its outer skin layer. */
     static void initialize() {
         MeshDefinition mesh = new MeshDefinition();
         PartDefinition root = mesh.getRoot();
@@ -51,7 +58,12 @@ final class FirstPersonKickRenderer {
         pants = baked.getChild("pants");
     }
 
+    /** Returns true only when a leg was drawn, allowing the caller to hide the right hand. */
     static boolean render(RenderHandEvent event) {
+        // Return before CPM and vanilla rendering; false also preserves normal hand rendering.
+        if (ModList.get().isLoaded(YSM_MOD_ID)) {
+            return false;
+        }
         Minecraft minecraft = Minecraft.getInstance();
         AbstractClientPlayer player = minecraft.player;
         if (leg == null || pants == null || player == null || player.isInvisible()
@@ -92,6 +104,7 @@ final class FirstPersonKickRenderer {
         return true;
     }
 
+    /** Resolves the physical right hand for either main-arm preference. */
     static boolean isRightHand(RenderHandEvent event) {
         AbstractClientPlayer player = Minecraft.getInstance().player;
         if (player == null) {
