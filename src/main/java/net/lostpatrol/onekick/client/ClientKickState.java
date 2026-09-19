@@ -41,8 +41,6 @@ public final class ClientKickState {
     private static final int MACH_RING_MAX_PREDICTION_TICKS = 512;
     private static final int CHARGE_SMOKE_PARTICLE_MULTIPLIER = 3;
     private static final int UNSTABLE_EXPLOSION_LIFETIME_TICKS = 8;
-    // Past the 0.05 near plane so a camera-facing FLASH is never behind the view.
-    static final double FIRST_PERSON_FLASH_DISTANCE = 0.2D;
     private static final ResourceLocation GUI_ICONS_LOCATION =
             ResourceLocation.withDefaultNamespace("textures/gui/icons.png");
     private static final Map<Integer, PlayerAnimation> PLAYER_ANIMATIONS = new HashMap<>();
@@ -618,32 +616,9 @@ public final class ClientKickState {
                     outward.z * 0.035D);
         }
         if (enchantmentLevel >= 5) {
-            Minecraft minecraft = Minecraft.getInstance();
-            boolean firstPersonLocal = minecraft.player == player
-                    && minecraft.options.getCameraType().isFirstPerson();
-            Vec3 flashAt = chargeCompletionFlashPosition(
-                    center.add(0.0D, 0.1D, 0.0D),
-                    player.getEyePosition(),
-                    player.getLookAngle(),
-                    firstPersonLocal);
-            level.addParticle(ParticleTypes.FLASH, flashAt.x, flashAt.y, flashAt.z,
+            level.addParticle(ParticleTypes.FLASH, center.x, center.y + 0.1D, center.z,
                     0.0D, 0.0D, 0.0D);
         }
-    }
-
-    /**
-     * First person places FLASH along the look vector; a feet spawn sits behind the
-     * camera when looking up, and on the near plane when looking level.
-     */
-    static Vec3 chargeCompletionFlashPosition(
-            Vec3 feetPosition, Vec3 eye, Vec3 lookAngle, boolean firstPersonLocal) {
-        if (!firstPersonLocal) {
-            return feetPosition;
-        }
-        Vec3 look = lookAngle.lengthSqr() < 1.0E-6D
-                ? new Vec3(0.0D, 0.0D, 1.0D)
-                : lookAngle.normalize();
-        return eye.add(look.scale(FIRST_PERSON_FLASH_DISTANCE));
     }
 
     private static void emitOrbitingSoulFlames(

@@ -130,33 +130,6 @@ class ClientKickStateTest {
                 target.add(0.1D, -0.1D, 0.0D), target));
     }
 
-    @Test
-    void firstPersonChargeFlashStaysInFrontOfTheCameraWhenLookingUp() {
-        Vec3 feet = new Vec3(0.0D, 0.22D, 0.0D);
-        Vec3 eye = new Vec3(0.0D, 1.62D, 0.0D);
-        Vec3 up = new Vec3(0.0D, 1.0D, 0.0D);
-        Vec3 down = new Vec3(0.0D, -0.35D, 1.0D).normalize();
-        Vec3 forward = new Vec3(0.0D, 0.0D, 1.0D);
-
-        assertVecEquals(feet, ClientKickState.chargeCompletionFlashPosition(
-                feet, eye, forward, false));
-
-        Vec3 upFlash = ClientKickState.chargeCompletionFlashPosition(feet, eye, up, true);
-        Vec3 downFlash = ClientKickState.chargeCompletionFlashPosition(feet, eye, down, true);
-        Vec3 forwardFlash = ClientKickState.chargeCompletionFlashPosition(
-                feet, eye, forward, true);
-        assertEquals(ClientKickState.FIRST_PERSON_FLASH_DISTANCE,
-                upFlash.distanceTo(eye), EPSILON);
-        assertEquals(ClientKickState.FIRST_PERSON_FLASH_DISTANCE,
-                downFlash.distanceTo(eye), EPSILON);
-        assertEquals(ClientKickState.FIRST_PERSON_FLASH_DISTANCE,
-                forwardFlash.distanceTo(eye), EPSILON);
-        assertTrue(upFlash.y > eye.y);
-        assertTrue(downFlash.y < eye.y);
-        assertTrue(forwardFlash.z > eye.z);
-        assertVecEquals(up, upFlash.subtract(eye).normalize());
-    }
-
     private static void assertVecEquals(Vec3 expected, Vec3 actual) {
         assertTrue(expected.distanceToSqr(actual) <= EPSILON * EPSILON,
                 () -> "Expected " + expected + " but got " + actual);
