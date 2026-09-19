@@ -198,10 +198,7 @@ public final class KickManager {
                     ? actualMovement.length()
                     : firstImpactRemainingSpeed;
             float damage = KickMath.collisionDamage(beforeSpeed, afterSpeed, overloadLevel);
-            if (damage > 0.0F
-                    && entity.hurt(level.damageSources().flyIntoWall(), damage)) {
-                recordKickDamage(level, state, damage);
-            }
+            hurtAndRecordKickDamage(level, entity, state, damage);
             Vec3 impact = entityCollision == null
                     ? firstBlockImpact == null
                     ? findCurrentBlockImpact(level, entity, flightVelocity, actualMovement)
@@ -431,10 +428,7 @@ public final class KickManager {
         if (BlockImpactService.wouldEnterKickImpassable(level, entity, forcedVelocity)) {
             int overloadLevel = state.snapshot.enchantments().kineticOverload();
             float damage = KickMath.collisionDamage(state.traversalSpeed, 0.0D, overloadLevel);
-            if (damage > 0.0F
-                    && entity.hurt(level.damageSources().flyIntoWall(), damage)) {
-                recordKickDamage(level, state, damage);
-            }
+            hurtAndRecordKickDamage(level, entity, state, damage);
             haltControlledMotion(entity);
             stopTracking(entity);
             return;
@@ -460,9 +454,7 @@ public final class KickManager {
             float damage = KickMath.traversalDamage(
                     state.traversalSpeed, enchantments.kineticOverload());
             entity.invulnerableTime = 0;
-            if (entity.hurt(level.damageSources().flyIntoWall(), damage)) {
-                recordKickDamage(level, state, damage);
-            }
+            hurtAndRecordKickDamage(level, entity, state, damage);
             if (!entity.isAlive()) {
                 stopTracking(entity);
                 return;
@@ -478,6 +470,27 @@ public final class KickManager {
             return;
         }
         storeControlledMotion(entity, forcedVelocity);
+    }
+
+    /**
+     * Applies fly-into-wall damage and records only health/absorption actually lost.
+     */
+    private static void hurtAndRecordKickDamage(
+            ServerLevel level, LivingEntity entity, KickedMotionState state, float damage) {
+        if (damage <= 0.0F) {
+            return;
+        }
+        float healthBefore = entity.getHealth();
+        float absorptionBefore = entity.getAbsorptionAmount();
+        if (!entity.hurt(level.damageSources().flyIntoWall(), damage)) {
+            return;
+        }
+        float dealt = KickMath.actualDamageDealt(
+                healthBefore, absorptionBefore,
+                entity.getHealth(), entity.getAbsorptionAmount());
+        if (dealt > 0.0F) {
+            recordKickDamage(level, state, dealt);
+        }
     }
 
     private static void recordKickDamage(

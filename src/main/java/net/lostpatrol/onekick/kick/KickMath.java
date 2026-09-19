@@ -345,6 +345,20 @@ public final class KickMath {
         return disintegrationLevel > 0 && unstableCollisionLevel <= 0;
     }
 
+    /**
+     * Health and absorption actually lost by a hit. Requested damage can be
+     * much higher when armor, immunity frames, or other reductions apply.
+     */
+    public static float actualDamageDealt(
+            float healthBefore,
+            float absorptionBefore,
+            float healthAfter,
+            float absorptionAfter) {
+        float before = Math.max(0.0F, healthBefore) + Math.max(0.0F, absorptionBefore);
+        float after = Math.max(0.0F, healthAfter) + Math.max(0.0F, absorptionAfter);
+        return Math.max(0.0F, before - after);
+    }
+
     private static double nonNegative(double value) {
         return Double.isNaN(value) ? 0.0D : Math.max(0.0D, value);
     }
