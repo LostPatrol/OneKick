@@ -40,10 +40,15 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.ForgeEventFactory;
 import net.minecraftforge.event.level.BlockEvent;
 
+/**
+ * Server-side kick impact destruction, traversal blocking, and explosion scheduling.
+ */
 public final class BlockImpactService {
     private static final int MAX_DEBRIS_PER_IMPACT = 64;
     private static final int VANILLA_EXPLOSION_RAY_COUNT = 16 * 16 * 16 - 14 * 14 * 14;
     private static final long LOW_ALLOCATION_CAPSULE_SCAN_THRESHOLD = 4096L;
+    /** Treat near-face distances slightly behind the impact as still on the impact plane. */
+    private static final double IMPASSABLE_CLIP_EPSILON = 1.0E-4D;
     private static final List<ScheduledExplosion> SCHEDULED_EXPLOSIONS = new ArrayList<>();
     private static final Set<Explosion> DROP_SAFE_EXPLOSIONS =
             Collections.newSetFromMap(new IdentityHashMap<>());
@@ -70,8 +75,8 @@ public final class BlockImpactService {
                     KickMath.unstableExplosionRadius(launchSpeed, 3));
             double destructionRadius = levelThreeRadius * KickMath.unstableCollisionLevelScale(
                     enchantments.unstableCollision());
-            BlockImpactResult result = destroyCapsule(level, impact, movement, snapshot,
-                    destructionRadius, false, false);
+            BlockImpactResult result = destroyCapsule(level, impactedEntity, impact, movement,
+                    snapshot, destructionRadius, false, false);
             triggerBlockDestructionAdvancements(level, snapshot, result);
             scheduleExplosionChain(level, impactedEntity, impact, movement,
                     launchSpeed, destructionRadius, impactDamage,
@@ -96,8 +101,8 @@ public final class BlockImpactService {
         }
         if (hasDisintegration) {
             double radius = KickMath.disintegrationRadius(snapshot.kickSpeed(), false);
-            BlockImpactResult result = destroyCapsule(level, impact, movement, snapshot,
-                    radius, true, true);
+            BlockImpactResult result = destroyCapsule(level, impactedEntity, impact, movement,
+                    snapshot, radius, true, true);
             triggerBlockDestructionAdvancements(level, snapshot, result);
             if (KickMath.shouldEmitDisintegrationSmoke(
                     enchantments.disintegration(), enchantments.unstableCollision())) {
@@ -158,6 +163,8 @@ public final class BlockImpactService {
         Vec3 axis = safeDirection(movement);
         double depth = KickMath.disintegrationDepth(
                 snapshot.kickSpeed(), snapshot.enchantments().kineticOverload());
+        depth = Math.min(depth, findFirstKickImpassableDistance(
+                level, impactedEntity, impact, axis, depth));
         int count = Math.max(2, Mth.ceil(depth / 1.75D));
         float power = (float) explosionRadius;
         long now = level.getServer().getTickCount();
@@ -241,8 +248,14 @@ public final class BlockImpactService {
         }
     }
 
+    /**
+     * Destroys the irregular capsule from {@code impact} along the flight axis.
+     * Depth is cut at the first kick-impassable block the entity would hit so
+     * the far rounded cap cannot punch through unbreakable material.
+     */
     private static BlockImpactResult destroyCapsule(
             ServerLevel level,
+            LivingEntity impactedEntity,
             Vec3 impact,
             Vec3 movement,
             KickSnapshot snapshot,
@@ -252,7 +265,10 @@ public final class BlockImpactService {
         Vec3 axis = safeDirection(movement);
         double depth = KickMath.disintegrationDepth(
                 snapshot.kickSpeed(), snapshot.enchantments().kineticOverload());
-        Vec3 end = impact.add(axis.scale(depth));
+        double clipDistance = findFirstKickImpassableDistance(
+                level, impactedEntity, impact, axis, depth);
+        double axialEnd = Math.min(depth, clipDistance);
+        Vec3 end = impact.add(axis.scale(axialEnd));
         double outerRadius = radius * KickMath.IRREGULAR_DESTRUCTION_MAX_SCALE;
         int minX = Mth.floor(Math.min(impact.x, end.x) - outerRadius);
         int minY = Mth.floor(Math.min(impact.y, end.y) - outerRadius);
@@ -263,10 +279,10 @@ public final class BlockImpactService {
         List<BlockCandidate> candidates = isLargeCapsuleScan(
                 minX, minY, minZ, maxX, maxY, maxZ)
                 ? collectCapsuleCandidatesLowAllocation(
-                        level, impact, axis, depth, radius,
+                        level, impact, axis, depth, clipDistance, radius,
                         minX, minY, minZ, maxX, maxY, maxZ)
                 : collectCapsuleCandidates(
-                        level, impact, axis, depth, radius,
+                        level, impact, axis, depth, clipDistance, radius,
                         minX, minY, minZ, maxX, maxY, maxZ);
         candidates.sort(Comparator.comparingDouble(BlockCandidate::distance));
         return affectBlocks(level, impact, axis, movement.length(), snapshot,
@@ -279,6 +295,7 @@ public final class BlockImpactService {
             Vec3 impact,
             Vec3 axis,
             double depth,
+            double clipDistance,
             double radius,
             int minX,
             int minY,
@@ -286,6 +303,7 @@ public final class BlockImpactService {
             int maxX,
             int maxY,
             int maxZ) {
+        double axisAbsSum = Math.abs(axis.x) + Math.abs(axis.y) + Math.abs(axis.z);
         List<BlockCandidate> candidates = new ArrayList<>();
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
@@ -293,6 +311,9 @@ public final class BlockImpactService {
                     BlockPos pos = new BlockPos(x, y, z);
                     Vec3 relative = Vec3.atCenterOf(pos).subtract(impact);
                     double along = relative.dot(axis);
+                    if (isPastImpassableClip(along, axisAbsSum, clipDistance)) {
+                        continue;
+                    }
                     double perpendicular = relative.subtract(axis.scale(along)).length();
                     double effectiveRadius = radius * KickMath.irregularDestructionScale(
                             level.random.nextDouble());
@@ -311,6 +332,7 @@ public final class BlockImpactService {
             Vec3 impact,
             Vec3 axis,
             double depth,
+            double clipDistance,
             double radius,
             int minX,
             int minY,
@@ -318,6 +340,7 @@ public final class BlockImpactService {
             int maxX,
             int maxY,
             int maxZ) {
+        double axisAbsSum = Math.abs(axis.x) + Math.abs(axis.y) + Math.abs(axis.z);
         List<BlockCandidate> candidates = new ArrayList<>();
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
@@ -328,6 +351,9 @@ public final class BlockImpactService {
                     double along = relativeX * axis.x
                             + relativeY * axis.y
                             + relativeZ * axis.z;
+                    if (isPastImpassableClip(along, axisAbsSum, clipDistance)) {
+                        continue;
+                    }
                     double perpendicular = perpendicularDistance(
                             relativeX, relativeY, relativeZ, axis, along);
                     double effectiveRadius = radius * KickMath.irregularDestructionScale(
@@ -372,6 +398,15 @@ public final class BlockImpactService {
                 perpendicularX * perpendicularX
                         + perpendicularY * perpendicularY
                         + perpendicularZ * perpendicularZ);
+    }
+
+    /**
+     * True when a unit-cube block center is past the first impassable near face.
+     * An infinite {@code clipDistance} disables the cut.
+     */
+    static boolean isPastImpassableClip(
+            double along, double axisAbsSum, double clipDistance) {
+        return along - 0.5D * axisAbsSum > clipDistance;
     }
 
     private static BlockImpactResult destroySphere(
@@ -537,6 +572,82 @@ public final class BlockImpactService {
             }
         }
         return false;
+    }
+
+    /**
+     * Distance along {@code axis} from {@code impact} to the near face of the
+     * first kick-impassable block the entity's box would hit, or +inf if none
+     * exists within {@code maxDistance}.
+     */
+    static double findFirstKickImpassableDistance(
+            ServerLevel level,
+            LivingEntity entity,
+            Vec3 impact,
+            Vec3 axis,
+            double maxDistance) {
+        if (maxDistance <= 0.0D || axis.lengthSqr() < 1.0E-12D) {
+            return Double.POSITIVE_INFINITY;
+        }
+        AABB swept = entity.getBoundingBox()
+                .expandTowards(axis.scale(maxDistance))
+                .inflate(1.0E-6D);
+        int minX = Mth.floor(swept.minX);
+        int minY = Mth.floor(swept.minY);
+        int minZ = Mth.floor(swept.minZ);
+        int maxX = Mth.floor(swept.maxX);
+        int maxY = Mth.floor(swept.maxY);
+        int maxZ = Mth.floor(swept.maxZ);
+        double closest = Double.POSITIVE_INFINITY;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    cursor.set(x, y, z);
+                    if (!level.hasChunkAt(cursor) || level.isOutsideBuildHeight(cursor)) {
+                        continue;
+                    }
+                    BlockState state = level.getBlockState(cursor);
+                    if (!blocksKickTraversal(level, cursor, state)
+                            || state.getCollisionShape(level, cursor).isEmpty()) {
+                        continue;
+                    }
+                    AABB blockBounds = new AABB(cursor);
+                    if (!swept.intersects(blockBounds)) {
+                        continue;
+                    }
+                    double along = nearFaceAlongDistance(impact, axis, blockBounds);
+                    if (along >= -IMPASSABLE_CLIP_EPSILON && along < closest) {
+                        closest = Math.max(0.0D, along);
+                    }
+                }
+            }
+        }
+        return closest;
+    }
+
+    /**
+     * Axial distance from {@code impact} to the supporting face of {@code box}
+     * in the {@code axis} direction.
+     */
+    static double nearFaceAlongDistance(Vec3 impact, Vec3 axis, AABB box) {
+        double x = axis.x > IMPASSABLE_CLIP_EPSILON
+                ? box.minX
+                : axis.x < -IMPASSABLE_CLIP_EPSILON
+                ? box.maxX
+                : Mth.clamp(impact.x, box.minX, box.maxX);
+        double y = axis.y > IMPASSABLE_CLIP_EPSILON
+                ? box.minY
+                : axis.y < -IMPASSABLE_CLIP_EPSILON
+                ? box.maxY
+                : Mth.clamp(impact.y, box.minY, box.maxY);
+        double z = axis.z > IMPASSABLE_CLIP_EPSILON
+                ? box.minZ
+                : axis.z < -IMPASSABLE_CLIP_EPSILON
+                ? box.maxZ
+                : Mth.clamp(impact.z, box.minZ, box.maxZ);
+        return (x - impact.x) * axis.x
+                + (y - impact.y) * axis.y
+                + (z - impact.z) * axis.z;
     }
 
     public static boolean blocksKickTraversal(ServerLevel level, BlockPos pos) {

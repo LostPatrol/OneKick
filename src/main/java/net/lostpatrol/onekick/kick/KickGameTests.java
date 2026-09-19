@@ -97,6 +97,46 @@ public final class KickGameTests {
     }
 
     @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void disintegrationDoesNotDestroyBlocksBehindLaterBedrock(
+            GameTestHelper helper) {
+        // First impact is breakable stone; later bedrock must stop the capsule.
+        for (int x = 1; x <= 4; x++) {
+            for (int z = 1; z <= 3; z++) {
+                helper.setBlock(x, 2, z, Blocks.STONE);
+            }
+        }
+        for (int y = 2; y <= 5; y++) {
+            for (int z = 1; z <= 3; z++) {
+                helper.setBlock(5, y, z, Blocks.STONE);
+                helper.setBlock(6, y, z, Blocks.STONE);
+                helper.setBlock(7, y, z, Blocks.BEDROCK);
+                helper.setBlock(8, y, z, Blocks.STONE);
+            }
+        }
+        ServerPlayer attacker = registerSnapshotAttacker(helper);
+        Villager impactedEntity = helper.spawn(EntityType.VILLAGER, 4, 3, 2);
+        impactedEntity.setInvulnerable(true);
+        impactedEntity.setPos(helper.absoluteVec(new Vec3(4.0D, 3.0D, 2.5D)));
+        KickEnchantments enchantments = new KickEnchantments(
+                0, 0, 1, 0, 3, 0, 0, 0, false);
+        KickSnapshot snapshot = new KickSnapshot(
+                attacker.getUUID(), 12.0D, enchantments, ItemStack.EMPTY);
+        Vec3 impact = helper.absoluteVec(new Vec3(5.0D, 3.5D, 2.5D));
+        BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
+                new Vec3(16.0D, 0.0D, 0.0D), 16.0D, 5.0F, snapshot);
+        unregisterSnapshotAttacker(helper, attacker);
+        helper.assertTrue(helper.getBlockState(new BlockPos(5, 3, 2)).isAir(),
+                "Disintegration did not destroy the first breakable wall");
+        helper.assertTrue(helper.getBlockState(new BlockPos(6, 3, 2)).isAir(),
+                "Disintegration stopped before the later bedrock wall");
+        helper.assertTrue(helper.getBlockState(new BlockPos(7, 3, 2)).is(Blocks.BEDROCK),
+                "Disintegration destroyed bedrock");
+        helper.assertTrue(helper.getBlockState(new BlockPos(8, 3, 2)).is(Blocks.STONE),
+                "Disintegration destroyed stone behind a later bedrock wall");
+        helper.succeed();
+    }
+
+    @GameTest(template = "flight_room", timeoutTicks = 20)
     public static void customKickCriterionAwardsLoadedAdvancement(GameTestHelper helper) {
         ServerPlayer player = registerSnapshotAttacker(helper);
         Advancement advancement = helper.getLevel().getServer().getAdvancements().getAdvancement(

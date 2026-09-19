@@ -179,6 +179,18 @@ class KickMathTest {
     }
 
     @Test
+    void massiveDamageUsesHealthLostInsteadOfRequestedHit() {
+        assertEquals(80.0F, KickMath.actualDamageDealt(500.0F, 0.0F, 420.0F, 0.0F), 1.0E-6F);
+        assertEquals(500.0F, KickMath.actualDamageDealt(500.0F, 0.0F, 0.0F, 0.0F), 1.0E-6F);
+        assertEquals(0.0F, KickMath.actualDamageDealt(500.0F, 0.0F, 500.0F, 0.0F), 1.0E-6F);
+        assertEquals(20.0F, KickMath.actualDamageDealt(100.0F, 20.0F, 100.0F, 0.0F), 1.0E-6F);
+        assertTrue(KickMath.actualDamageDealt(500.0F, 0.0F, 1.0F, 0.0F) < 500.0F);
+        assertTrue(KickMath.collisionDamage(40.0D, 0.0D, 3) > 500.0F);
+        assertTrue(KickMath.actualDamageDealt(500.0F, 0.0F, 200.0F, 0.0F)
+                < KickMath.collisionDamage(40.0D, 0.0D, 3));
+    }
+
+    @Test
     void launchDirectionRespondsStronglyToUpwardView() {
         Vec3 flat = KickMath.launchDirection(new Vec3(0.0D, 0.0D, 1.0D));
         Vec3 upward = KickMath.launchDirection(new Vec3(0.0D, 0.6D, 0.8D));
