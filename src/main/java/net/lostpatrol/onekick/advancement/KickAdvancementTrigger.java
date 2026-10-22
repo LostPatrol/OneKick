@@ -1,3 +1,4 @@
+/** Data-driven advancement events emitted by kick effects. */
 package net.lostpatrol.onekick.advancement;
 
 import com.google.gson.JsonObject;
@@ -16,15 +17,18 @@ public final class KickAdvancementTrigger
         extends SimpleCriterionTrigger<KickAdvancementTrigger.TriggerInstance> {
     private final ResourceLocation id;
 
+    /** Associates all kick event instances with the criterion registry ID. */
     public KickAdvancementTrigger(ResourceLocation id) {
         this.id = id;
     }
 
+    /** Returns the registered criterion ID. */
     @Override
     public ResourceLocation getId() {
         return id;
     }
 
+    /** Reads the event name from advancement JSON. */
     @Override
     protected TriggerInstance createInstance(
             JsonObject json,
@@ -34,6 +38,7 @@ public final class KickAdvancementTrigger
                 Event.fromName(GsonHelper.getAsString(json, "event")));
     }
 
+    /** Awards listeners matching the emitted kick event. */
     public void trigger(ServerPlayer player, Event event) {
         trigger(player, instance -> instance.matches(event));
     }
@@ -51,14 +56,18 @@ public final class KickAdvancementTrigger
         MACH_LAUNCH("mach_launch"),
         MASS_DESTRUCTION("mass_destruction"),
         MASSIVE_DAMAGE("massive_damage"),
-        ULTIMATE_KICK("ultimate_kick");
+        ULTIMATE_KICK("ultimate_kick"),
+        OVERRIDE("override"),
+        TRAILBLAZER("trailblazer");
 
         private final String name;
 
+        /** Associates an event with its persistent resource name. */
         Event(String name) {
             this.name = name;
         }
 
+        /** Resolves resource names and rejects unknown criteria. */
         static Event fromName(String name) {
             return Arrays.stream(values())
                     .filter(event -> event.name.equals(name))
@@ -67,6 +76,7 @@ public final class KickAdvancementTrigger
                             "Unknown OneKick advancement event: " + name));
         }
 
+        /** Returns the persistent resource name. */
         String serializedName() {
             return name;
         }
@@ -75,16 +85,19 @@ public final class KickAdvancementTrigger
     public static final class TriggerInstance extends AbstractCriterionTriggerInstance {
         private final Event event;
 
+        /** Freezes the criterion's event and player predicate. */
         private TriggerInstance(
                 ResourceLocation id, ContextAwarePredicate player, Event event) {
             super(id, player);
             this.event = event;
         }
 
+        /** Tests whether this criterion listens for the emitted event. */
         private boolean matches(Event event) {
             return this.event == event;
         }
 
+        /** Writes the event alongside vanilla player conditions. */
         @Override
         public JsonObject serializeToJson(SerializationContext context) {
             JsonObject json = super.serializeToJson(context);

@@ -1,13 +1,17 @@
+/** Exercises kick motion, world effects, enchantment rules, and real advancement awards. */
 package net.lostpatrol.onekick.kick;
 
 import com.mojang.authlib.GameProfile;
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import net.lostpatrol.onekick.OneKick;
 import net.lostpatrol.onekick.advancement.KickAdvancementTrigger;
 import net.lostpatrol.onekick.advancement.ModCriteriaTriggers;
 import net.lostpatrol.onekick.config.OneKickConfig;
+import net.lostpatrol.onekick.registry.ModEnchantments;
+import net.lostpatrol.onekick.registry.ModTags;
 import net.lostpatrol.onekick.world.BlockImpactService;
 import net.minecraft.advancements.Advancement;
 import net.minecraft.core.BlockPos;
@@ -18,10 +22,12 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
@@ -34,6 +40,65 @@ import net.minecraftforge.gametest.PrefixGameTestTemplate;
 @PrefixGameTestTemplate(false)
 public final class KickGameTests {
     private KickGameTests() {
+    }
+
+    /** Registered Forge enchantments preserve boot support, acquisition, and level costs. */
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void registeredEnchantmentsPreserveBootRulesAndCosts(GameTestHelper helper) {
+        Enchantment singularity = ModEnchantments.SINGULARITY.get();
+        Enchantment afterburner = ModEnchantments.AFTERBURNER.get();
+        Map<Enchantment, Integer> expectedMaximumLevels = Map.of(
+                ModEnchantments.REACTION.get(), 1,
+                ModEnchantments.AERODYNAMICS.get(), 3,
+                ModEnchantments.DISINTEGRATION.get(), 1,
+                ModEnchantments.UNSTABLE_COLLISION.get(), 3,
+                ModEnchantments.KINETIC_OVERLOAD.get(), 3,
+                ModEnchantments.CHARGE.get(), 5,
+                ModEnchantments.ANGULAR_MOMENTUM.get(), 1,
+                ModEnchantments.OVERCHARGE.get(), 2,
+                singularity, 1,
+                afterburner, 1);
+        ItemStack boots = new ItemStack(Items.IRON_BOOTS);
+        for (var entry : expectedMaximumLevels.entrySet()) {
+            Enchantment enchantment = entry.getKey();
+            helper.assertTrue(enchantment.canEnchant(boots),
+                    enchantment.getDescriptionId() + " does not support boots");
+            helper.assertTrue(enchantment.getMaxLevel() == entry.getValue(),
+                    enchantment.getDescriptionId() + " has the wrong maximum level");
+            for (int level = 1; level <= enchantment.getMaxLevel(); level++) {
+                boolean addedEnchantment = enchantment == singularity || enchantment == afterburner;
+                int window = enchantment.getMaxCost(level) - enchantment.getMinCost(level);
+                helper.assertTrue(addedEnchantment ? window > 0 : window == 15,
+                        enchantment.getDescriptionId() + " has an invalid enchanting cost window");
+            }
+        }
+        helper.assertTrue(singularity.isTreasureOnly(),
+                "Singularity must be excluded from ordinary enchanting-table selection");
+        helper.assertTrue(singularity.isTradeable() && singularity.isDiscoverable()
+                        && singularity.isAllowedOnBooks(),
+                "Singularity must remain available through treasure books and trading");
+        helper.assertTrue(singularity.getMinCost(1) == 40 && singularity.getMaxCost(1) == 65,
+                "Singularity changed its intended enchanting costs");
+        helper.assertTrue(!afterburner.isTreasureOnly()
+                        && afterburner.getRarity() == Enchantment.Rarity.RARE,
+                "Afterburner must be a normal rare enchantment");
+        helper.assertTrue(afterburner.isTradeable() && afterburner.isDiscoverable()
+                        && afterburner.isAllowedOnBooks(),
+                "Afterburner lost its ordinary acquisition routes");
+        helper.assertTrue(afterburner.getMinCost(1) == 25 && afterburner.getMaxCost(1) == 45,
+                "Afterburner changed its intended enchanting costs");
+        helper.assertTrue(Enchantments.SILK_TOUCH.canEnchant(boots),
+                "Silk Touch no longer supports boots");
+        boots.enchant(ModEnchantments.CHARGE.get(), 4);
+        boots.enchant(Enchantments.SILK_TOUCH, 1);
+        boots.enchant(singularity, 1);
+        boots.enchant(afterburner, 1);
+        KickEnchantments enchantments = KickEnchantments.from(boots);
+        helper.assertTrue(enchantments.charge() == 4 && enchantments.silkTouch(),
+                "Kick enchantment snapshot lost Charge or boot Silk Touch");
+        helper.assertTrue(enchantments.singularity() == 1 && enchantments.afterburner() == 1,
+                "Kick snapshot did not read the new boot enchantments");
+        helper.succeed();
     }
 
     @GameTest(template = "flight_room", timeoutTicks = 20)
@@ -86,9 +151,9 @@ public final class KickGameTests {
 
         helper.runAtTickTime(15, () -> {
             unregisterSnapshotAttacker(helper, attacker);
-            helper.assertTrue(villager.getX() < 7.0D,
+            helper.assertTrue(villager.getX() < helper.absolutePos(new BlockPos(7, 3, 2)).getX(),
                     "Disintegration traversal phased through bedrock");
-            helper.assertTrue(villager.getX() > 2.0D,
+            helper.assertTrue(villager.getX() > helper.absolutePos(new BlockPos(2, 3, 2)).getX(),
                     "Disintegration kick into bedrock did not move the target");
             helper.assertTrue(helper.getBlockState(new BlockPos(8, 3, 2)).is(Blocks.STONE),
                     "Disintegration destroyed stone behind a bedrock first impact");
@@ -136,11 +201,208 @@ public final class KickGameTests {
         helper.succeed();
     }
 
+    /** A fully charged combination erases hard, tagged, and liquid blocks past bedrock. */
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void singularityErasesProtectedBlocksAndAwardsOverride(GameTestHelper helper) {
+        ServerPlayer attacker = registerSnapshotAttacker(helper);
+        try {
+            Villager target = helper.spawn(EntityType.VILLAGER, 5, 3, 2);
+            target.setInvulnerable(true);
+            helper.setBlock(6, 3, 2, Blocks.BEDROCK);
+            helper.setBlock(7, 3, 2, Blocks.REINFORCED_DEEPSLATE);
+            helper.setBlock(8, 3, 2, Blocks.STONE);
+            helper.setBlock(6, 3, 1, Blocks.WATER);
+            helper.assertTrue(helper.getBlockState(new BlockPos(7, 3, 2))
+                            .is(ModTags.DISINTEGRATION_IMMUNE),
+                    "Regression setup needs a tagged immune block");
+            Advancement override = loadedAdvancement(helper, "override");
+            helper.assertTrue(!attacker.getAdvancements().getOrStartProgress(override).isDone(),
+                    "Override was already complete before removing bedrock");
+            KickSnapshot snapshot = singularitySnapshot(attacker, 5, 2, 1, 1,
+                    KickMath.maxCharge(5, 2));
+            Vec3 impact = helper.absoluteVec(new Vec3(6.0D, 3.5D, 2.5D));
+            BlockImpactService.handleImpact(helper.getLevel(), target, impact,
+                    new Vec3(1.2D, 0.0D, 0.0D), 1.2D, 1.0F, snapshot);
+
+            for (BlockPos position : List.of(new BlockPos(6, 3, 2), new BlockPos(7, 3, 2),
+                    new BlockPos(8, 3, 2), new BlockPos(6, 3, 1))) {
+                helper.assertTrue(helper.getBlockState(position).isAir(),
+                        "Singularity did not erase block at " + position);
+            }
+            helper.assertTrue(attacker.getAdvancements().getOrStartProgress(override).isDone(),
+                    "Actual bedrock removal did not award Override");
+            helper.succeed();
+        } finally {
+            unregisterSnapshotAttacker(helper, attacker);
+        }
+    }
+
+    /** Missing requirements and partial charge retain the original destruction limits. */
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void incompleteSingularityCannotEraseBedrockOrAwardOverride(GameTestHelper helper) {
+        ServerPlayer attacker = registerSnapshotAttacker(helper);
+        try {
+            Villager target = helper.spawn(EntityType.VILLAGER, 5, 3, 2);
+            target.setInvulnerable(true);
+            float maximum = KickMath.maxCharge(5, 2);
+            List<KickSnapshot> inactive = List.of(
+                    singularitySnapshot(attacker, 5, 2, 1, 1, maximum - 0.01F),
+                    singularitySnapshot(attacker, 4, 2, 1, 1, maximum),
+                    singularitySnapshot(attacker, 5, 1, 1, 1, maximum),
+                    singularitySnapshot(attacker, 5, 2, 0, 1, maximum),
+                    singularitySnapshot(attacker, 5, 2, 1, 0, maximum));
+            for (KickSnapshot snapshot : inactive) {
+                helper.setBlock(6, 3, 2, Blocks.BEDROCK);
+                helper.setBlock(7, 3, 2, Blocks.REINFORCED_DEEPSLATE);
+                helper.setBlock(8, 3, 2, Blocks.STONE);
+                BlockImpactService.handleImpact(helper.getLevel(), target,
+                        helper.absoluteVec(new Vec3(6.0D, 3.5D, 2.5D)),
+                        new Vec3(1.2D, 0.0D, 0.0D), 1.2D, 1.0F, snapshot);
+                helper.assertBlockPresent(Blocks.BEDROCK, new BlockPos(6, 3, 2));
+                helper.assertBlockPresent(Blocks.REINFORCED_DEEPSLATE, new BlockPos(7, 3, 2));
+                helper.assertBlockPresent(Blocks.STONE, new BlockPos(8, 3, 2));
+            }
+            helper.assertTrue(!attacker.getAdvancements()
+                            .getOrStartProgress(loadedAdvancement(helper, "override")).isDone(),
+                    "Override was awarded without removing bedrock");
+            helper.succeed();
+        } finally {
+            unregisterSnapshotAttacker(helper, attacker);
+        }
+    }
+
+    /** The live first-contact gate must allow Singularity into an unbreakable wall. */
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void singularityFirstBedrockImpactStartsTraversal(GameTestHelper helper) {
+        ServerPlayer attacker = registerSnapshotAttacker(helper);
+        Villager target = helper.spawn(EntityType.VILLAGER, 5, 3, 2);
+        target.setPos(helper.absoluteVec(new Vec3(5.0D, 3.0D, 2.5D)));
+        target.setInvulnerable(true);
+        try {
+            for (int y = 3; y <= 4; y++) {
+                for (int z = 1; z <= 3; z++) {
+                    helper.setBlock(6, y, z, Blocks.BEDROCK);
+                }
+            }
+            KickSnapshot snapshot = singularitySnapshot(attacker, 5, 2, 1, 1,
+                    KickMath.maxCharge(5, 2));
+            KickManager.startKickedMotion(target, snapshot, new Vec3(1.2D, 0.0D, 0.0D), false);
+            KickManager.tickLiving(target);
+            helper.assertTrue(helper.getBlockState(new BlockPos(6, 3, 2)).isAir(),
+                    "The first-impact gate prevented Singularity from removing bedrock");
+            helper.assertTrue(target.noPhysics, "Singularity did not start disintegration traversal");
+            KickManager.tickLiving(target);
+            helper.assertTrue(target.getX() > helper.absolutePos(new BlockPos(6, 3, 2)).getX(),
+                    "Singularity traversal did not move through its erased first wall");
+            helper.succeed();
+        } finally {
+            KickManager.removeLiving(target);
+            unregisterSnapshotAttacker(helper, attacker);
+        }
+    }
+
+    /** Flight integration ignites both the target and a low trail, while high trails stay clear. */
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void afterburnerBurnsTargetAndHonorsGroundReach(GameTestHelper helper) {
+        clearFireTestRoom(helper);
+        fillFireTestFloor(helper, 1);
+        Villager target = helper.spawn(EntityType.VILLAGER, 2, 3, 2);
+        target.setPos(helper.absoluteVec(new Vec3(2.5D, 3.0D, 2.5D)));
+        KickSnapshot snapshot = afterburnerSnapshot(UUID.randomUUID(), 0);
+        try {
+            Vec3 highFrom = helper.absoluteVec(new Vec3(2.5D, 7.0D, 2.5D));
+            AfterburnerService.trail(helper.getLevel(), target, highFrom,
+                    highFrom.add(5.0D, 0.0D, 0.0D), snapshot);
+            helper.assertTrue(snapshot.progress().ignitedBlockCount() == 0,
+                    "High flight ignited ground beyond Afterburner's vertical reach");
+            KickManager.startKickedMotion(target, snapshot, new Vec3(1.2D, 0.0D, 0.0D), false);
+            helper.assertTrue(target.isOnFire(), "Afterburner did not ignite the kicked target");
+            KickManager.tickLiving(target);
+            helper.assertTrue(snapshot.progress().ignitedBlockCount() > 0,
+                    "Low controlled flight did not ignite its ground projection");
+            helper.assertBlockPresent(Blocks.FIRE, new BlockPos(2, 2, 2));
+
+            KickSnapshot fractionalSnapshot = new KickSnapshot(
+                    snapshot.attackerId(), 1.25D, snapshot.enchantments(), ItemStack.EMPTY);
+            target.clearFire();
+            AfterburnerService.igniteTarget(target, fractionalSnapshot);
+            helper.assertTrue(target.getRemainingFireTicks() == 90,
+                    "Afterburner discarded fractional seconds from its burn duration");
+            ItemStack protectedBoots = new ItemStack(Items.IRON_BOOTS);
+            protectedBoots.enchant(Enchantments.FIRE_PROTECTION, 4);
+            target.setItemSlot(EquipmentSlot.FEET, protectedBoots);
+            target.clearFire();
+            AfterburnerService.igniteTarget(target, fractionalSnapshot);
+            // Vanilla Fire Protection IV removes 60% of the original 90 ticks.
+            helper.assertTrue(target.getRemainingFireTicks() == 36,
+                    "Afterburner ignored vanilla Fire Protection's duration reduction");
+            helper.succeed();
+        } finally {
+            KickManager.removeLiving(target);
+        }
+    }
+
+    /** Repeated samples cannot replace the requirement for more than 100 distinct ignitions. */
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void afterburnerCountsDistinctFireAndAwardsTrailblazer(GameTestHelper helper) {
+        clearFireTestRoom(helper);
+        fillFireTestFloor(helper, 1);
+        fillFireTestFloor(helper, 4);
+        ServerPlayer attacker = registerSnapshotAttacker(helper);
+        try {
+            Villager target = helper.spawn(EntityType.VILLAGER, 1, 2, 1);
+            KickSnapshot snapshot = afterburnerSnapshot(attacker.getUUID(), 0);
+            Advancement trailblazer = loadedAdvancement(helper, "trailblazer");
+            igniteFireTestLayer(helper, target, snapshot, 2);
+            int lowerCount = snapshot.progress().ignitedBlockCount();
+            helper.assertTrue(lowerCount > 0 && lowerCount <= 100,
+                    "The first fire layer did not stay below Trailblazer's threshold");
+            helper.assertTrue(!attacker.getAdvancements().getOrStartProgress(trailblazer).isDone(),
+                    "Trailblazer was awarded before more than 100 distinct fires");
+            igniteFireTestLayer(helper, target, snapshot, 2);
+            helper.assertTrue(snapshot.progress().ignitedBlockCount() == lowerCount,
+                    "Repeated trail samples counted existing fire twice");
+            igniteFireTestLayer(helper, target, snapshot, 5);
+            helper.assertTrue(snapshot.progress().ignitedBlockCount() > 100,
+                    "Afterburner did not record over 100 distinct fire placements");
+            helper.assertTrue(attacker.getAdvancements().getOrStartProgress(trailblazer).isDone(),
+                    "Actual fire placements did not award Trailblazer");
+            helper.succeed();
+        } finally {
+            unregisterSnapshotAttacker(helper, attacker);
+        }
+    }
+
+    /** The unstable-collision path ignites surviving surfaces after its explosion. */
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void afterburnerUnstableExplosionsIgniteSurvivingGround(GameTestHelper helper) {
+        clearFireTestRoom(helper);
+        fillFireTestFloor(helper, 2);
+        ServerPlayer attacker = registerSnapshotAttacker(helper);
+        try {
+            Villager target = helper.spawn(EntityType.VILLAGER, 8, 3, 2);
+            target.setInvulnerable(true);
+            KickSnapshot snapshot = afterburnerSnapshot(attacker.getUUID(), 3);
+            Vec3 impact = helper.absoluteVec(new Vec3(8.0D, 3.5D, 2.5D));
+            // Several independent explosions make the random ignition check robust.
+            for (int attempt = 0; attempt < 8 && snapshot.progress().ignitedBlockCount() == 0;
+                    attempt++) {
+                BlockImpactService.handleImpact(helper.getLevel(), target, impact,
+                        new Vec3(1.0D, 0.0D, 0.0D), 1.0D, 0.0F, snapshot);
+            }
+            helper.assertTrue(snapshot.progress().ignitedBlockCount() > 0,
+                    "Afterburner + unstable collision did not ignite explosion surfaces");
+            helper.succeed();
+        } finally {
+            unregisterSnapshotAttacker(helper, attacker);
+        }
+    }
+
     @GameTest(template = "flight_room", timeoutTicks = 20)
     public static void customKickCriterionAwardsLoadedAdvancement(GameTestHelper helper) {
         ServerPlayer player = registerSnapshotAttacker(helper);
         Advancement advancement = helper.getLevel().getServer().getAdvancements().getAdvancement(
-                ResourceLocation.fromNamespaceAndPath(OneKick.MOD_ID, "root"));
+                new ResourceLocation(OneKick.MOD_ID, "root"));
         try {
             helper.assertTrue(advancement != null, "OneKick root advancement was not loaded");
             ModCriteriaTriggers.trigger(player, KickAdvancementTrigger.Event.KICK);
@@ -274,6 +536,32 @@ public final class KickGameTests {
         helper.assertTrue(villager.getZ() < start.z + 0.2D,
                 "Entity slid along the wall before collision: start="
                         + start + ", current=" + villager.position());
+        helper.succeed();
+    }
+
+    /** Lethal damage must preserve the first wall's physical contact point. */
+    @GameTest(template = "flight_room", timeoutTicks = 20)
+    public static void lethalKickStopsAtFirstWallContact(GameTestHelper helper) {
+        for (int y = 3; y <= 5; y++) {
+            for (int z = 1; z <= 3; z++) {
+                helper.setBlock(5, y, z, Blocks.STONE);
+            }
+        }
+        Villager villager = helper.spawn(EntityType.VILLAGER, 2, 3, 2);
+        Vec3 start = villager.position();
+        KickSnapshot snapshot = new KickSnapshot(
+                UUID.randomUUID(), 30.0D,
+                KickEnchantments.from(ItemStack.EMPTY), ItemStack.EMPTY);
+        KickManager.startKickedMotion(
+                villager, snapshot, new Vec3(30.0D, 0.0D, 0.0D), false);
+        KickManager.tickLiving(villager);
+
+        helper.assertTrue(!villager.isAlive(),
+                "Lethal first-contact kinetic damage did not kill the target");
+        helper.assertTrue(villager.getX() > start.x + 1.0D,
+                "Lethal kick killed the target at its launch position");
+        helper.assertTrue(villager.getX() < helper.absolutePos(new BlockPos(5, 3, 2)).getX(),
+                "Lethal kick moved the target through the first wall");
         helper.succeed();
     }
 
@@ -443,6 +731,11 @@ public final class KickGameTests {
             GameTestHelper helper) {
         ServerPlayer attacker = registerSnapshotAttacker(helper);
         attacker.setInvulnerable(true);
+        Vec3 impact = helper.absoluteVec(new Vec3(5.5D, 3.0D, 2.5D));
+        // Completed batches can leave drops outside this fixture but inside its wider query.
+        helper.getLevel().getEntitiesOfClass(
+                ItemEntity.class, AABB.ofSize(impact, 30.0D, 20.0D, 20.0D))
+                .forEach(ItemEntity::discard);
         Villager impactedEntity = helper.spawn(EntityType.VILLAGER, 6, 3, 2);
         impactedEntity.setInvulnerable(true);
         ItemEntity existingDrop = helper.spawnItem(Items.DIAMOND, 5.5F, 7.0F, 2.5F);
@@ -452,7 +745,6 @@ public final class KickGameTests {
                 0, 0, 1, 3, 1, 0, 0, 0, false);
         KickSnapshot snapshot = new KickSnapshot(
                 attacker.getUUID(), 6.0D, enchantments, ItemStack.EMPTY);
-        Vec3 impact = helper.absoluteVec(new Vec3(5.5D, 3.0D, 2.5D));
         BlockImpactService.handleImpact(helper.getLevel(), impactedEntity, impact,
                 new Vec3(6.0D, 0.0D, 0.0D), 6.0D, 5.0F, snapshot);
 
@@ -465,6 +757,53 @@ public final class KickGameTests {
                     "Kinetic Overload drop protection allowed triple-enchantment block drops");
             helper.succeed();
         });
+    }
+
+    /** Keeps destruction small while varying the frozen activation requirements. */
+    private static KickSnapshot singularitySnapshot(ServerPlayer attacker, int chargeLevel,
+            int overcharge, int disintegration, int singularity, float charge) {
+        KickEnchantments enchantments = new KickEnchantments(
+                0, 0, disintegration, 0, 0, chargeLevel, overcharge, 0, false, singularity, 0);
+        return new KickSnapshot(attacker.getUUID(), 1.0D, enchantments, ItemStack.EMPTY, charge);
+    }
+
+    /** Supplies one shared fire counter for all effects of the test kick. */
+    private static KickSnapshot afterburnerSnapshot(UUID attackerId, int unstableCollision) {
+        KickEnchantments enchantments = new KickEnchantments(
+                0, 0, 0, unstableCollision, 0, 0, 0, 0, false, 0, 1);
+        return new KickSnapshot(attackerId, 1.0D, enchantments, ItemStack.EMPTY);
+    }
+
+    /** Resolves the real data-pack advancement and fails clearly when resources are missing. */
+    private static Advancement loadedAdvancement(GameTestHelper helper, String name) {
+        Advancement advancement = helper.getLevel().getServer().getAdvancements().getAdvancement(
+                new ResourceLocation(OneKick.MOD_ID, name));
+        helper.assertTrue(advancement != null, "OneKick advancement was not loaded: " + name);
+        return advancement;
+    }
+
+    /** Removes the template wall without modifying blocks outside the fixture. */
+    private static void clearFireTestRoom(GameTestHelper helper) {
+        for (BlockPos position : BlockPos.betweenClosed(0, 1, 0, 15, 7, 4)) {
+            helper.setBlock(position, Blocks.AIR);
+        }
+    }
+
+    /** Builds an 80-block supported layer inside the existing narrow flight room. */
+    private static void fillFireTestFloor(GameTestHelper helper, int y) {
+        for (BlockPos position : BlockPos.betweenClosed(0, y, 0, 15, y, 4)) {
+            helper.setBlock(position, Blocks.STONE);
+        }
+    }
+
+    /** Two overlapping flight segments cover a whole layer with a single kick snapshot. */
+    private static void igniteFireTestLayer(GameTestHelper helper, Villager target,
+            KickSnapshot snapshot, int y) {
+        for (double z : new double[]{1.5D, 3.5D}) {
+            AfterburnerService.trail(helper.getLevel(), target,
+                    helper.absoluteVec(new Vec3(1.5D, y, z)),
+                    helper.absoluteVec(new Vec3(14.5D, y, z)), snapshot);
+        }
     }
 
     private static long countCobblestoneDrops(GameTestHelper helper, Vec3 impact) {

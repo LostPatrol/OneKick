@@ -45,6 +45,8 @@ This mod adds a set of enchantments that can only go on boots. Vanilla Silk Touc
 | Disintegration | `onekick:disintegration` | Uncommon | 1 | Breaks blocks when a kicked creature hits a wall |
 | Unstable Collision | `onekick:unstable_collision` | Very rare | 3 | Explodes on impact (does not break blocks on its own) |
 | Kinetic Overload | `onekick:kinetic_overload` | Very rare | 3 | Greatly increases kick speed, impact damage, and destruction |
+| Singularity | `onekick:singularity` | Treasure | 1 | A fully charged kick with Charge V, Overcharge II, and Disintegration can erase any block, including bedrock |
+| Afterburner | `onekick:afterburner` | Rare | 1 | Burns kicked creatures longer with stronger kicks, leaves flame and smoke trails, and ignites nearby ground during low flight |
 | Silk Touch (vanilla) | `minecraft:silk_touch` | — | 1 | Kick-broken blocks drop 100% of the time and are silk-touched |
 
 + Besides the hunger spent while charging, a charged kick spends extra hunger on release. If hunger is not enough at that moment, kick power is scaled down in proportion.
@@ -62,6 +64,10 @@ All of the enchantments above can be combined in any way and still do their own 
 | Disintegration + Kinetic Overload | Impact causes very long, large-scale block destruction |
 | Disintegration + Unstable Collision | The impact explosion breaks blocks using Unstable Collision's logic; Disintegration's own destruction is disabled |
 | Disintegration + Unstable Collision + Kinetic Overload | Impact causes very long, fairly wide large-scale block destruction and explosions |
+| Singularity + Charge V + Overcharge II + Disintegration | At full charge, bypasses hardness and kick immunity, including bedrock; otherwise Singularity is inactive |
+| Afterburner + Unstable Collision | Explosions randomly ignite nearby surfaces |
+
+Singularity is a treasure enchantment found in loot or trades, rather than at the enchanting table. Erase bedrock to earn the **Override** challenge, or ignite over 100 blocks in one kick to earn **Trailblazer**.
 
 
 
@@ -82,7 +88,7 @@ Data packs and other mods can change these tags to configure this mod's effects:
 | --- | --- | --- |
 | `onekick:entity_types/kick_immune` | `minecraft:ender_dragon` | Cannot be launched |
 | `onekick:entity_types/flying` | allay, bat, bee, blaze, ender dragon, ghast, parrot, phantom, vex, wither | Cannot be spun by Conservation of Angular Momentum; vanilla `FlyingMob` / `FlyingAnimal` are also excluded |
-| `onekick:blocks/disintegration_immune` | `#minecraft:wither_immune` | Cannot be broken by kick destruction |
+| `onekick:blocks/disintegration_immune` | `#minecraft:wither_immune` | Cannot be broken by kick destruction unless Singularity is active |
 | `onekick:blocks/disintegration_direct` | glass, glass pane, `#minecraft:leaves`, `#minecraft:wool` | Shatter in place; no flying debris |
 
 

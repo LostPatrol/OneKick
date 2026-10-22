@@ -45,6 +45,8 @@ One Kick 是一款围绕“踢”展开的 Minecraft Forge/Neoforge 模组，添
 | 崩解 | `onekick:disintegration` | 罕见 | 1 | 被踢生物撞墙时造成方块破坏 |
 | 不稳定碰撞 | `onekick:unstable_collision` | 非常罕见 | 3 | 撞击时爆炸（单独使用不会破坏方块） |
 | 动能过载 | `onekick:kinetic_overload` | 非常罕见 | 3 | 大幅提高踢击速度、撞击伤害与破坏效果 |
+| 奇点 | `onekick:singularity` | 宝藏 | 1 | 配合蓄力 V、超量充能 II 与崩解，满蓄力踢击可以抹去包括基岩在内的一切方块 |
+| 尾焰 | `onekick:afterburner` | 稀有 | 1 | 点燃被踢生物，力度越强燃烧越久；飞行留下火焰与烟雾尾迹，低空飞行点燃附近地面 |
 | 精准采集（原版） | `minecraft:silk_touch` | — | 1 | 踢击破坏的方块将100%掉落且具有精准采集效果 |
 
 + 除蓄力过程会消耗饱食度外，蓄力踢击还会额外消耗饱食度。若踢击时饱食度不足，则威力会按比例衰减。
@@ -62,6 +64,10 @@ One Kick 是一款围绕“踢”展开的 Minecraft Forge/Neoforge 模组，添
 | 崩解 + 动能过载 | 撞击会造成长度极大的大规模方块破坏 |
 | 崩解 + 不稳定碰撞 | 撞击爆炸会按不稳定碰撞的逻辑进行破坏方块；禁用崩解附魔的破坏效果 |
 | 崩解 + 不稳定碰撞 + 动能过载 | 撞击将造成长度极大、半径较大的大规模方块破坏与爆炸 |
+| 奇点 + 蓄力 V + 超量充能 II + 崩解 | 蓄力达到上限时，无视方块硬度与踢击免疫，包括基岩；其他情况下奇点不生效 |
+| 尾焰 + 不稳定碰撞 | 爆炸会随机点燃范围内的部分地面 |
+
+奇点是宝藏附魔，可通过战利品或交易获取，不能通过附魔台获得。抹去基岩可完成挑战**逃逸**；一次踢击点燃超过 100 个方块可完成进度**热失控**。
 
 
 
@@ -82,7 +88,7 @@ One Kick 是一款围绕“踢”展开的 Minecraft Forge/Neoforge 模组，添
 | --- | --- | --- |
 | `onekick:entity_types/kick_immune` | `minecraft:ender_dragon` | 不能被踢飞 |
 | `onekick:entity_types/flying` | 悦灵、蝙蝠、蜜蜂、烈焰人、末影龙、恶魂、鹦鹉、幻翼、恼鬼、凋灵 | 不会被角动量守恒转起来；原版 `FlyingMob` / `FlyingAnimal` 同样排除 |
-| `onekick:blocks/disintegration_immune` | `#minecraft:wither_immune` | 不能被踢击破坏 |
+| `onekick:blocks/disintegration_immune` | `#minecraft:wither_immune` | 不能被踢击破坏，奇点生效时除外 |
 | `onekick:blocks/disintegration_direct` | 玻璃、玻璃板、`#minecraft:leaves`、`#minecraft:wool` | 直接碎裂，不生成飞散碎块 |
 
 

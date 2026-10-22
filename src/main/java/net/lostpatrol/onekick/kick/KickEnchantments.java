@@ -1,3 +1,4 @@
+/** Captures equipped boot enchantments for a single kick. */
 package net.lostpatrol.onekick.kick;
 
 import net.lostpatrol.onekick.registry.ModEnchantments;
@@ -14,8 +15,19 @@ public record KickEnchantments(
         int charge,
         int overcharge,
         int angularMomentum,
-        boolean silkTouch
+        boolean silkTouch,
+        int singularity,
+        int afterburner
 ) {
+    /** Preserves snapshots without the optional singularity and fire effects. */
+    public KickEnchantments(int reaction, int aerodynamics, int disintegration,
+            int unstableCollision, int kineticOverload, int charge, int overcharge,
+            int angularMomentum, boolean silkTouch) {
+        this(reaction, aerodynamics, disintegration, unstableCollision, kineticOverload,
+                charge, overcharge, angularMomentum, silkTouch, 0, 0);
+    }
+
+    /** Reads the equipped boots using the Forge enchantment registry. */
     public static KickEnchantments from(ItemStack boots) {
         if (boots.isEmpty()) {
             return new KickEnchantments(0, 0, 0, 0, 0, 0, 0, 0, false);
@@ -29,7 +41,9 @@ public record KickEnchantments(
                 EnchantmentHelper.getItemEnchantmentLevel(ModEnchantments.CHARGE.get(), boots),
                 EnchantmentHelper.getItemEnchantmentLevel(ModEnchantments.OVERCHARGE.get(), boots),
                 EnchantmentHelper.getItemEnchantmentLevel(ModEnchantments.ANGULAR_MOMENTUM.get(), boots),
-                EnchantmentHelper.getItemEnchantmentLevel(Enchantments.SILK_TOUCH, boots) > 0
+                EnchantmentHelper.getItemEnchantmentLevel(Enchantments.SILK_TOUCH, boots) > 0,
+                EnchantmentHelper.getItemEnchantmentLevel(ModEnchantments.SINGULARITY.get(), boots),
+                EnchantmentHelper.getItemEnchantmentLevel(ModEnchantments.AFTERBURNER.get(), boots)
         );
     }
 }

@@ -7,6 +7,8 @@
   "enchantment.onekick.charge": "Charge",
   "enchantment.onekick.overcharge": "Overcharge",
   "enchantment.onekick.angular_momentum": "Conservation of Angular Momentum",
+  "enchantment.onekick.singularity": "Singularity",
+  "enchantment.onekick.afterburner": "Afterburner",
   "entity.onekick.impact_debris": "Impact Debris",
   "key.onekick.kick": "Kick / Charge Kick",
   "key.categories.onekick": "One Kick",
@@ -40,5 +42,9 @@
   "advancements.onekick.massive_damage.title": "One-Kick Hero",
   "advancements.onekick.massive_damage.description": "Deal at least 500 damage with one kick",
   "advancements.onekick.ultimate_kick.title": "One Kick!",
-  "advancements.onekick.ultimate_kick.description": "Land the strongest possible One Kick"
+  "advancements.onekick.ultimate_kick.description": "Land the strongest possible One Kick",
+  "advancements.onekick.override.title": "Override",
+  "advancements.onekick.override.description": "Erase a block of Bedrock",
+  "advancements.onekick.trailblazer.title": "Trailblazer",
+  "advancements.onekick.trailblazer.description": "Ignite over 100 blocks in a single kick"
 }

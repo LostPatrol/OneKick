@@ -1,3 +1,4 @@
+/** Server-side kick destruction, traversal limits, and delayed explosions. */
 package net.lostpatrol.onekick.world;
 
 import java.util.ArrayList;
@@ -12,6 +13,7 @@ import javax.annotation.Nullable;
 import net.lostpatrol.onekick.advancement.KickAdvancementTrigger;
 import net.lostpatrol.onekick.advancement.ModCriteriaTriggers;
 import net.lostpatrol.onekick.config.OneKickConfig;
+import net.lostpatrol.onekick.kick.AfterburnerService;
 import net.lostpatrol.onekick.kick.KickEnchantments;
 import net.lostpatrol.onekick.kick.KickMath;
 import net.lostpatrol.onekick.kick.KickSnapshot;
@@ -31,6 +33,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Explosion;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.gameevent.GameEvent;
@@ -150,6 +153,7 @@ public final class BlockImpactService {
         }
     }
 
+    /** Schedules explosions along the same permitted capsule depth. */
     private static void scheduleExplosionChain(
             ServerLevel level,
             LivingEntity impactedEntity,
@@ -163,8 +167,10 @@ public final class BlockImpactService {
         Vec3 axis = safeDirection(movement);
         double depth = KickMath.disintegrationDepth(
                 snapshot.kickSpeed(), snapshot.enchantments().kineticOverload());
-        depth = Math.min(depth, findFirstKickImpassableDistance(
-                level, impactedEntity, impact, axis, depth));
+        if (!snapshot.singularityActive()) {
+            depth = Math.min(depth, findFirstKickImpassableDistance(
+                    level, impactedEntity, impact, axis, depth));
+        }
         int count = Math.max(2, Mth.ceil(depth / 1.75D));
         float power = (float) explosionRadius;
         long now = level.getServer().getTickCount();
@@ -179,6 +185,7 @@ public final class BlockImpactService {
         }
     }
 
+    /** Applies an uncancelled kick explosion, then ignites its remaining surfaces. */
     private static ExplosionResult explode(
             ServerLevel level,
             @Nullable Entity excludedEntity,
@@ -211,6 +218,7 @@ public final class BlockImpactService {
         BlockImpactResult blockImpact = destroyBlocks
                 ? destroySphere(level, position, movement, power, snapshot, false)
                 : BlockImpactResult.EMPTY;
+        AfterburnerService.igniteExplosion(level, position, power, snapshot);
         return new ExplosionResult(true, blockImpact);
     }
 
@@ -250,8 +258,7 @@ public final class BlockImpactService {
 
     /**
      * Destroys the irregular capsule from {@code impact} along the flight axis.
-     * Depth is cut at the first kick-impassable block the entity would hit so
-     * the far rounded cap cannot punch through unbreakable material.
+     * Ordinary kicks stop at the first impassable face; Singularity keeps full depth.
      */
     private static BlockImpactResult destroyCapsule(
             ServerLevel level,
@@ -265,8 +272,9 @@ public final class BlockImpactService {
         Vec3 axis = safeDirection(movement);
         double depth = KickMath.disintegrationDepth(
                 snapshot.kickSpeed(), snapshot.enchantments().kineticOverload());
-        double clipDistance = findFirstKickImpassableDistance(
-                level, impactedEntity, impact, axis, depth);
+        double clipDistance = snapshot.singularityActive()
+                ? Double.POSITIVE_INFINITY
+                : findFirstKickImpassableDistance(level, impactedEntity, impact, axis, depth);
         double axialEnd = Math.min(depth, clipDistance);
         Vec3 end = impact.add(axis.scale(axialEnd));
         double outerRadius = radius * KickMath.IRREGULAR_DESTRUCTION_MAX_SCALE;
@@ -446,6 +454,7 @@ public final class BlockImpactService {
         }
     }
 
+    /** Applies eligible destruction and counts only blocks actually removed. */
     private static BlockImpactResult affectBlocks(
             ServerLevel level,
             Vec3 impact,
@@ -464,6 +473,7 @@ public final class BlockImpactService {
         boolean suppressDrops = KickMath.shouldSuppressKineticOverloadBlockDrops(
                 OneKickConfig.suppressKineticOverloadBlockDrops(),
                 snapshot.enchantments().kineticOverload());
+        boolean singularityActive = snapshot.singularityActive();
         int affected = 0;
         int debrisCount = 0;
         List<BlockPos> affectedPositions = collectAffectedPositions
@@ -474,7 +484,7 @@ public final class BlockImpactService {
                 continue;
             }
             BlockState state = level.getBlockState(pos);
-            if (!canDestroy(level, pos, state)) {
+            if (!canDestroy(level, pos, state, singularityActive)) {
                 continue;
             }
             BlockEvent.BreakEvent breakEvent = new BlockEvent.BreakEvent(level, pos, state, attacker);
@@ -485,6 +495,8 @@ public final class BlockImpactService {
             boolean eligibleDrop = silkTouch || level.random.nextDouble() < dropChance;
             boolean shouldDrop = !suppressDrops && eligibleDrop;
             boolean animate = animateDebris
+                    // Erased blocks must not survive as debris or leave their fluid behind.
+                    && !singularityActive
                     && debrisCount < MAX_DEBRIS_PER_IMPACT
                     && !state.is(ModTags.DISINTEGRATION_DIRECT)
                     && !state.hasBlockEntity()
@@ -511,12 +523,23 @@ public final class BlockImpactService {
                 double strength = KickMath.impactDebrisInitialSpeed(
                         impactSpeed, level.random.nextDouble());
                 Vec3 velocity = flightDirection.normalize().scale(strength);
-                ImpactDebrisEntity.launch(level, pos, state, velocity, attacker,
+                ImpactDebrisEntity debris = ImpactDebrisEntity.launch(level, pos, state, velocity, attacker,
                         silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop);
+                if (level.getBlockState(pos).equals(state)) {
+                    debris.discard();
+                    continue;
+                }
                 debrisCount++;
             } else {
-                removeBlock(level, pos, state, attacker,
-                        silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop);
+                if (!removeBlock(level, pos, state, attacker,
+                        silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop,
+                        singularityActive)) {
+                    continue;
+                }
+            }
+            if (state.is(Blocks.BEDROCK)) {
+                ModCriteriaTriggers.trigger(
+                        level, snapshot, KickAdvancementTrigger.Event.OVERRIDE);
             }
             if ((affected & 7) == 0) {
                 level.levelEvent(2001, pos, Block.getId(state));
@@ -530,10 +553,14 @@ public final class BlockImpactService {
                 collectAffectedPositions ? List.copyOf(affectedPositions) : List.of());
     }
 
-    private static boolean canDestroy(ServerLevel level, BlockPos pos, BlockState state) {
-        return !state.isAir()
-                && !state.is(ModTags.DISINTEGRATION_IMMUNE)
-                && state.getDestroySpeed(level, pos) >= 0.0F;
+    /** Singularity ignores material hardness and the mod's immune tag. */
+    private static boolean canDestroy(
+            ServerLevel level, BlockPos pos, BlockState state, boolean singularityActive) {
+        if (state.isAir()) {
+            return false;
+        }
+        return singularityActive || (!state.is(ModTags.DISINTEGRATION_IMMUNE)
+                && state.getDestroySpeed(level, pos) >= 0.0F);
     }
 
     public static boolean blocksKickTraversal(ServerLevel level, Vec3 impact, Vec3 movement) {
@@ -672,19 +699,27 @@ public final class BlockImpactService {
         return destroySpeed < 0.0F || impassableTag;
     }
 
-    private static void removeBlock(
+    /** Replaces a block before releasing its drops; Singularity also erases fluids. */
+    private static boolean removeBlock(
             ServerLevel level,
             BlockPos pos,
             BlockState state,
             ServerPlayer attacker,
             ItemStack tool,
-            boolean shouldDrop) {
+            boolean shouldDrop,
+            boolean singularityActive) {
         BlockEntity blockEntity = level.getBlockEntity(pos);
         List<ItemStack> drops = shouldDrop
                 ? Block.getDrops(state, level, pos, blockEntity, attacker, tool)
                 : List.of();
-        level.setBlock(pos, state.getFluidState().createLegacyBlock(), 3);
+        BlockState replacement = singularityActive
+                ? Blocks.AIR.defaultBlockState()
+                : state.getFluidState().createLegacyBlock();
+        if (!level.setBlock(pos, replacement, 3) || level.getBlockState(pos).equals(state)) {
+            return false;
+        }
         drops.forEach(stack -> Block.popResource(level, pos, stack));
+        return true;
     }
 
     private static Vec3 safeDirection(Vec3 movement) {
