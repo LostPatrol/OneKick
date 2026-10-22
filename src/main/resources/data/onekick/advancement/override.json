@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:disintegration_block_break",
+  "display": {
+    "icon": {
+      "id": "minecraft:bedrock"
+    },
+    "title": {
+      "translate": "advancements.onekick.override.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.override.description"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "override": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "override"
+      }
+    }
+  }
+}

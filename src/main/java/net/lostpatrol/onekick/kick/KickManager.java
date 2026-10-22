@@ -1,3 +1,4 @@
+/** Coordinates charge, launch, controlled flight, and kick impact effects. */
 package net.lostpatrol.onekick.kick;
 
 import java.util.HashMap;
@@ -67,7 +68,7 @@ public final class KickManager {
             KickEnchantments enchantments = KickEnchantments.from(boots);
             int chargeLevel = enchantments.charge();
             if (chargeLevel <= 0) {
-                performKick(player, 0.0F);
+                performKick(player, 0.0F, 0.0F);
                 return;
             }
             state.charging = true;
@@ -128,6 +129,7 @@ public final class KickManager {
         }
     }
 
+    /** Moves launched entities and applies effects along the actual traveled segment. */
     public static void tickLiving(LivingEntity entity) {
         if (!(entity.level() instanceof ServerLevel level)) {
             return;
@@ -179,6 +181,7 @@ public final class KickManager {
         Vec3 currentPosition = entity.position();
         AABB currentBounds = entity.getBoundingBox();
         Vec3 actualMovement = currentPosition.subtract(startPosition);
+        AfterburnerService.trail(level, entity, startPosition, currentPosition, state.snapshot);
         Entity entityCollision = state.age > 2
                 ? findEntityCollision(level, entity, state, currentPosition, currentBounds)
                 : null;
@@ -205,7 +208,8 @@ public final class KickManager {
                     : firstBlockImpact.location()
                     : entityCollision.getBoundingBox().getCenter();
             KickEnchantments enchantments = state.snapshot.enchantments();
-            if (!BlockImpactService.blocksKickTraversal(level, impact, flightVelocity)) {
+            if (state.snapshot.singularityActive()
+                    || !BlockImpactService.blocksKickTraversal(level, impact, flightVelocity)) {
                 BlockImpactService.handleImpact(level, entity, impact, flightVelocity,
                         state.initialVelocity.length(), damage, state.snapshot);
                 if (entity.isAlive()
@@ -275,7 +279,10 @@ public final class KickManager {
         KICKED_ENTITIES.clear();
     }
 
+    /** Preserves attained charge for synergies while hunger still scales kick strength. */
     private static void releaseCharge(ServerPlayer player, PlayerKickState state) {
+        // Maximum overcharge costs more than one hunger bar; do not make Singularity creative-only.
+        float attainedCharge = state.charge;
         float effectiveCharge = state.charge;
         if (!player.getAbilities().instabuild && effectiveCharge > 0.0F) {
             int desiredCost = Mth.ceil(KickMath.chargedKickFoodCost(effectiveCharge));
@@ -290,7 +297,7 @@ public final class KickManager {
         KickNetwork.broadcastChargeState(
                 player, false, 0.0F, state.chargeMaximum,
                 state.chargeLevel, state.kineticOverloadLevel);
-        performKick(player, effectiveCharge);
+        performKick(player, effectiveCharge, attainedCharge);
     }
 
     private static void cancelCharge(ServerPlayer player, PlayerKickState state) {
@@ -301,7 +308,8 @@ public final class KickManager {
         KickNetwork.broadcastPlayerAnimation(player, KickNetwork.ANIMATION_STOP);
     }
 
-    private static void performKick(ServerPlayer player, float charge) {
+    /** Resolves kick strength and aim using the captured release state. */
+    private static void performKick(ServerPlayer player, float charge, float attainedCharge) {
         PlayerKickState playerState = state(player);
         playerState.cooldown = KickMath.COOLDOWN_TICKS;
         ItemStack boots = player.getItemBySlot(EquipmentSlot.FEET).copy();
@@ -319,7 +327,7 @@ public final class KickManager {
                 && target.isAlive()
                 && !(target instanceof EnderDragon)
                 && !target.getType().is(ModTags.KICK_IMMUNE)) {
-            kickEntity(player, target, boots, enchantments, kickSpeed, charge);
+            kickEntity(player, target, boots, enchantments, kickSpeed, charge, attainedCharge);
             return;
         }
 
@@ -338,13 +346,15 @@ public final class KickManager {
         }
     }
 
+    /** Launches a target using release-time enchantments and effective charge. */
     private static void kickEntity(
             ServerPlayer player,
             LivingEntity target,
             ItemStack boots,
             KickEnchantments enchantments,
             double kickSpeed,
-            float charge) {
+            float charge,
+            float attainedCharge) {
         Vec3 look = player.getLookAngle().normalize();
         Vec3 launchDirection = KickMath.launchDirection(look);
         double launchSpeed = KickMath.launchSpeed(kickSpeed, target);
@@ -363,7 +373,8 @@ public final class KickManager {
                 && !(target instanceof FlyingMob)
                 && !(target instanceof FlyingAnimal)
                 && !target.getType().is(ModTags.FLYING);
-        KickSnapshot snapshot = new KickSnapshot(player.getUUID(), kickSpeed, enchantments, boots);
+        KickSnapshot snapshot = new KickSnapshot(
+                player.getUUID(), kickSpeed, enchantments, boots, attainedCharge);
         startKickedMotion(target, snapshot, velocity, spin);
         if (spin) {
             ModCriteriaTriggers.trigger(
@@ -377,9 +388,11 @@ public final class KickManager {
         }
     }
 
+    /** Starts a fresh kick and applies its initial fire effect. */
     static void startKickedMotion(
             LivingEntity target, KickSnapshot snapshot, Vec3 velocity, boolean spin) {
         stopTracking(target);
+        AfterburnerService.igniteTarget(target, snapshot);
         boolean originalNoAi = target instanceof Mob mob && mob.isNoAi();
         KickedMotionState motionState = new KickedMotionState(
                 snapshot, target.position(), target.getBoundingBox(), velocity, spin,
@@ -414,6 +427,7 @@ public final class KickManager {
         storeControlledMotion(entity, state.lastVelocity);
     }
 
+    /** Advances through the destroyed area while honoring ordinary impassable blocks. */
     private static void tickTraversal(
             ServerLevel level, LivingEntity entity, KickedMotionState state) {
         Vec3 currentPosition = entity.position();
@@ -425,7 +439,8 @@ public final class KickManager {
 
         double forcedSpeed = Math.min(state.traversalSpeed, state.traversalRemaining);
         Vec3 forcedVelocity = state.traversalDirection.scale(forcedSpeed);
-        if (BlockImpactService.wouldEnterKickImpassable(level, entity, forcedVelocity)) {
+        if (!state.snapshot.singularityActive()
+                && BlockImpactService.wouldEnterKickImpassable(level, entity, forcedVelocity)) {
             int overloadLevel = state.snapshot.enchantments().kineticOverload();
             float damage = KickMath.collisionDamage(state.traversalSpeed, 0.0D, overloadLevel);
             hurtAndRecordKickDamage(level, entity, state, damage);
@@ -445,6 +460,7 @@ public final class KickManager {
         entity.fallDistance = 0.0F;
         entity.move(MoverType.SELF, forcedVelocity);
         Vec3 movedPosition = entity.position();
+        AfterburnerService.trail(level, entity, currentPosition, movedPosition, state.snapshot);
         state.traversalRemaining -= movedPosition.distanceTo(currentPosition);
         state.traversalTicks++;
         KickEnchantments enchantments = state.snapshot.enchantments();

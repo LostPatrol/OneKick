@@ -8,6 +8,7 @@
     "onekick:kinetic_overload",
     "onekick:charge",
     "onekick:overcharge",
-    "onekick:angular_momentum"
+    "onekick:angular_momentum",
+    "onekick:afterburner"
   ]
 }

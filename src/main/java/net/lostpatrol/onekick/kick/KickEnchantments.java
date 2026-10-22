@@ -1,3 +1,4 @@
+/** Captures boot enchantments for a single kick. */
 package net.lostpatrol.onekick.kick;
 
 import net.lostpatrol.onekick.registry.ModEnchantments;
@@ -15,8 +16,19 @@ public record KickEnchantments(
         int charge,
         int overcharge,
         int angularMomentum,
-        boolean silkTouch
+        boolean silkTouch,
+        int singularity,
+        int afterburner
 ) {
+    /** Creates a snapshot without the optional fire and singularity effects. */
+    public KickEnchantments(int reaction, int aerodynamics, int disintegration,
+            int unstableCollision, int kineticOverload, int charge, int overcharge,
+            int angularMomentum, boolean silkTouch) {
+        this(reaction, aerodynamics, disintegration, unstableCollision, kineticOverload,
+                charge, overcharge, angularMomentum, silkTouch, 0, 0);
+    }
+
+    /** Reads the equipped boots, including data-driven enchantments. */
     public static KickEnchantments from(ItemStack boots) {
         if (boots.isEmpty()) {
             return new KickEnchantments(0, 0, 0, 0, 0, 0, 0, 0, false);
@@ -30,10 +42,13 @@ public record KickEnchantments(
                 level(boots, ModEnchantments.CHARGE),
                 level(boots, ModEnchantments.OVERCHARGE),
                 level(boots, ModEnchantments.ANGULAR_MOMENTUM),
-                level(boots, Enchantments.SILK_TOUCH) > 0
+                level(boots, Enchantments.SILK_TOUCH) > 0,
+                level(boots, ModEnchantments.SINGULARITY),
+                level(boots, ModEnchantments.AFTERBURNER)
         );
     }
 
+    /** Finds a registry-key enchantment on the item. */
     private static int level(ItemStack stack, ResourceKey<Enchantment> enchantment) {
         for (var entry : stack.getEnchantments().entrySet()) {
             if (entry.getKey().is(enchantment)) {

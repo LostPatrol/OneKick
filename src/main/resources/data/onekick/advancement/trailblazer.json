@@ -1,0 +1,26 @@
+{
+  "parent": "onekick:root",
+  "display": {
+    "icon": {
+      "id": "minecraft:blaze_powder"
+    },
+    "title": {
+      "translate": "advancements.onekick.trailblazer.title"
+    },
+    "description": {
+      "translate": "advancements.onekick.trailblazer.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "trailblazer": {
+      "trigger": "onekick:kick_event",
+      "conditions": {
+        "event": "trailblazer"
+      }
+    }
+  }
+}

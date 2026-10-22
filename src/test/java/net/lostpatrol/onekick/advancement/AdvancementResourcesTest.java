@@ -1,3 +1,4 @@
+/** Verifies that kick advancements expose matching criteria and translations. */
 package net.lostpatrol.onekick.advancement;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,6 +20,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class AdvancementResourcesTest {
+    /** Resource paths and their corresponding trigger event names. */
     private static final Map<String, String> ADVANCEMENTS = Map.ofEntries(
             Map.entry("root", "kick"),
             Map.entry("charged_kick", "charged_kick"),
@@ -32,8 +34,11 @@ class AdvancementResourcesTest {
             Map.entry("mach_launch", "mach_launch"),
             Map.entry("mass_destruction", "mass_destruction"),
             Map.entry("massive_damage", "massive_damage"),
-            Map.entry("ultimate_kick", "ultimate_kick"));
+            Map.entry("ultimate_kick", "ultimate_kick"),
+            Map.entry("override", "override"),
+            Map.entry("trailblazer", "trailblazer"));
 
+    /** Every declared kick event has one valid advancement resource. */
     @Test
     void advancementResourcesCoverEveryTriggerEvent() throws IOException {
         Set<String> configuredEvents = new HashSet<>();
@@ -62,6 +67,7 @@ class AdvancementResourcesTest {
         assertEquals(declaredEvents, configuredEvents);
     }
 
+    /** Every advancement has English and Simplified Chinese display text. */
     @Test
     void bothLanguagesContainEveryAdvancementText() throws IOException {
         JsonObject english = resourceJson("assets/onekick/lang/en_us.json");
@@ -75,12 +81,23 @@ class AdvancementResourcesTest {
         }
     }
 
+    /** The two new milestones retain their requested advancement types. */
+    @Test
+    void newMilestonesUseRequestedFrames() throws IOException {
+        assertEquals("challenge", resourceJson("data/onekick/advancement/override.json")
+                .getAsJsonObject("display").get("frame").getAsString());
+        assertEquals("task", resourceJson("data/onekick/advancement/trailblazer.json")
+                .getAsJsonObject("display").get("frame").getAsString());
+    }
+
+    /** Invalid event names fail when loading advancement criteria. */
     @Test
     void unknownEventNamesAreRejected() {
         assertThrows(JsonSyntaxException.class,
                 () -> KickAdvancementTrigger.Event.fromName("not_an_event"));
     }
 
+    /** Loads a packaged JSON resource as UTF-8. */
     private static JsonObject resourceJson(String path) throws IOException {
         InputStream stream = AdvancementResourcesTest.class.getClassLoader()
                 .getResourceAsStream(path);

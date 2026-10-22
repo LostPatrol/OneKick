@@ -7,6 +7,8 @@
   "enchantment.onekick.charge": "蓄力",
   "enchantment.onekick.overcharge": "超量充能",
   "enchantment.onekick.angular_momentum": "角动量守恒",
+  "enchantment.onekick.singularity": "奇点",
+  "enchantment.onekick.afterburner": "尾焰",
   "entity.onekick.impact_debris": "冲击碎块",
   "key.onekick.kick": "踢击 / 蓄力踢击",
   "key.categories.onekick": "One Kick",
@@ -40,5 +42,9 @@
   "advancements.onekick.massive_damage.title": "一踢超人",
   "advancements.onekick.massive_damage.description": "在单次踢击中造成超过500点伤害",
   "advancements.onekick.ultimate_kick.title": "OneKick!",
-  "advancements.onekick.ultimate_kick.description": "以完全体附魔靴子释放OneKick模组的最强一击"
+  "advancements.onekick.ultimate_kick.description": "以完全体附魔靴子释放OneKick模组的最强一击",
+  "advancements.onekick.override.title": "逃逸",
+  "advancements.onekick.override.description": "将一块基岩从世界上抹去",
+  "advancements.onekick.trailblazer.title": "热失控",
+  "advancements.onekick.trailblazer.description": "一次踢击中点燃超过100个方块"
 }
