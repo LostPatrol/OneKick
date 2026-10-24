@@ -12,7 +12,7 @@ Used well, one kick can send a pesky Warden flying, or shear the top off a mount
 
 | Mod version | Minecraft | Loader | Java |
 | --- | --- | --- | --- |
-| 1.20.1-1.0.0 | 1.20.1 | Forge 47.4.10 | 17 |
+| 1.20.1-1.1.0 | 1.20.1 | Forge 47.4.10 | 17 |
 | 1.21.1-1.1.0 | 1.21.1 | NeoForge 21.1.235 | 21 |
 
 - Side: client and server. Install the mod on both sides for multiplayer.
@@ -47,8 +47,8 @@ This mod adds a set of enchantments that can only go on boots. Vanilla Silk Touc
 | Disintegration | `onekick:disintegration` | Uncommon | 1 | Breaks blocks when a kicked creature hits a wall |
 | Unstable Collision | `onekick:unstable_collision` | Very rare | 3 | Explodes on impact (does not break blocks on its own) |
 | Kinetic Overload | `onekick:kinetic_overload` | Very rare | 3 | Greatly increases kick speed, impact damage, and destruction |
-| Singularity | `onekick:singularity` | Treasure | 1 | Fully charged kicks with Charge V, Overcharge II, and Disintegration erase any block, including bedrock |
-| Afterburner | `onekick:afterburner` | Rare | 1 | Burns kicked creatures longer with stronger kicks, leaves flame and smoke trails, and ignites nearby ground during low flight |
+| Singularity (treasure enchantment) | `onekick:singularity` | Treasure | 1 | Kicks at maximum charge can destroy any block |
+| Afterburner | `onekick:afterburner` | Rare | 1 | Sets kicked creatures on fire and leaves a flame trail |
 | Silk Touch (vanilla) | `minecraft:silk_touch` | — | 1 | Kick-broken blocks drop 100% of the time and are silk-touched |
 
 - Besides the hunger spent while charging, a charged kick spends extra hunger on release. If hunger is not enough at that moment, kick power is scaled down in proportion.
@@ -64,10 +64,8 @@ All of the enchantments above can be combined in any way and still do their own 
 | Disintegration + Kinetic Overload | Impact causes very long, large-scale block destruction |
 | Disintegration + Unstable Collision | The impact explosion breaks blocks using Unstable Collision's logic; Disintegration's own destruction is disabled |
 | Disintegration + Unstable Collision + Kinetic Overload | Impact causes very long, fairly wide large-scale block destruction and explosions |
-| Singularity + Charge V + Overcharge II + Disintegration | At full charge, bypasses hardness and kick immunity, including bedrock |
-| Afterburner + Unstable Collision | Explosions randomly ignite nearby surfaces |
-
-Singularity is obtainable through loot and trades. Erase bedrock to earn the **Override** challenge, or ignite over 100 blocks in one kick to earn **Trailblazer**.
+| Singularity + Charge V + Overcharge II + Disintegration | At maximum charge, bypasses block hardness and kick immunity, including bedrock |
+| Afterburner + Unstable Collision | Explosions randomly ignite blocks within their range |
 
 ## Configuration and commands
 
