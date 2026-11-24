@@ -13,7 +13,7 @@ Used well, one kick can send a pesky Warden flying, or shear the top off a mount
 | Mod version | Minecraft | Loader | Java |
 | --- | --- | --- | --- |
 | 1.20.1-1.1.0 | 1.20.1 | Forge 47.4.10 | 17 |
-| 1.21.1-1.1.0 | 1.21.1 | NeoForge 21.1.235 | 21 |
+| 1.21.1-1.1.1 | 1.21.1 | NeoForge 21.1.235 | 21 |
 
 - Side: client and server. Install the mod on both sides for multiplayer.
 - Dependencies: no additional mods are required.

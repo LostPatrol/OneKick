@@ -13,6 +13,8 @@ import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModEnchantments;
 import net.lostpatrol.onekick.registry.ModTags;
 import net.lostpatrol.onekick.world.BlockImpactService;
+import net.lostpatrol.onekick.world.SableBlockCollision;
+import net.lostpatrol.onekick.world.SableCompatibility;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -172,8 +174,9 @@ public final class KickManager {
                 ? beforeSpeed
                 : firstBlockImpact.remainingSpeed(flightVelocity);
         boolean stopAtFirstBlock = firstBlockImpact != null
-                && KickMath.collisionDamage(
-                        beforeSpeed, firstImpactRemainingSpeed, overloadLevel) > 0.0F;
+                && (KickMath.collisionDamage(
+                        beforeSpeed, firstImpactRemainingSpeed, overloadLevel) > 0.0F
+                || firstBlockImpact.plotContact() != null && state.age > 1);
         Vec3 requestedMovement = stopAtFirstBlock
                 ? flightVelocity.scale(firstBlockImpact.safeMovementFraction(flightVelocity))
                 : flightVelocity;
@@ -202,15 +205,18 @@ public final class KickManager {
                     : firstImpactRemainingSpeed;
             float damage = KickMath.collisionDamage(beforeSpeed, afterSpeed, overloadLevel);
             hurtAndRecordKickDamage(level, entity, state, damage);
-            Vec3 impact = entityCollision == null
+            ImpactLocation impact = entityCollision == null
                     ? firstBlockImpact == null
                     ? findCurrentBlockImpact(level, entity, flightVelocity, actualMovement)
-                    : firstBlockImpact.location()
-                    : entityCollision.getBoundingBox().getCenter();
+                    : new ImpactLocation(firstBlockImpact.location(),
+                            firstBlockImpact.plotContact() == null ? null : firstBlockImpact.plotContact().block())
+                    : new ImpactLocation(entityCollision.getBoundingBox().getCenter(), null);
             KickEnchantments enchantments = state.snapshot.enchantments();
             if (state.snapshot.singularityActive()
-                    || !BlockImpactService.blocksKickTraversal(level, impact, flightVelocity)) {
-                BlockImpactService.handleImpact(level, entity, impact, flightVelocity,
+                    || (impact.plotBlock() == null || !BlockImpactService.blocksKickTraversal(
+                            level, impact.plotBlock()))
+                    && !BlockImpactService.blocksKickTraversal(level, impact.world(), flightVelocity)) {
+                BlockImpactService.handleImpact(level, entity, impact.world(), flightVelocity,
                         state.initialVelocity.length(), damage, state.snapshot);
                 if (entity.isAlive()
                         && (enchantments.disintegration() > 0 || enchantments.unstableCollision() > 0)) {
@@ -578,7 +584,7 @@ public final class KickManager {
         Vec3 fullEnd = start.add(direction.scale(KickMath.KICK_REACH));
         BlockHitResult blockHit = level.clip(new ClipContext(start, fullEnd,
                 ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
-        Vec3 clippedEnd = blockHit.getType() == HitResult.Type.MISS ? fullEnd : blockHit.getLocation();
+        Vec3 clippedEnd = blockHit.getType() == HitResult.Type.MISS ? fullEnd : impactLocation(level, blockHit).world();
         AABB searchBox = player.getBoundingBox().expandTowards(direction.scale(KickMath.KICK_REACH)).inflate(1.0D);
         EntityHitResult entityHit = ProjectileUtil.getEntityHitResult(level, player, start, clippedEnd, searchBox,
                 EntitySelector.NO_SPECTATORS.and(Entity::isPickable));
@@ -586,7 +592,7 @@ public final class KickManager {
             return new AimResult(AimType.ENTITY, entityHit.getEntity(), entityHit.getLocation());
         }
         if (blockHit.getType() != HitResult.Type.MISS) {
-            return new AimResult(AimType.BLOCK, null, blockHit.getLocation());
+            return new AimResult(AimType.BLOCK, null, clippedEnd);
         }
         return new AimResult(AimType.AIR, null, fullEnd);
     }
@@ -662,6 +668,14 @@ public final class KickManager {
                     closestContactDistance = contactDistance;
                 }
             }
+        }
+        SableBlockCollision.Contact plotContact = SableBlockCollision.first(
+                level, entity, bounds, movement, false, MIN_VERTICAL_BLOCK_IMPACT_SPEED);
+        if (plotContact != null && (closestImpact == null
+                || plotContact.fraction() < closestImpact.movementFraction() - BLOCK_SWEEP_EPSILON)) {
+            return new FirstBlockImpact(plotContact.worldPoint(), Direction.getNearest(
+                    plotContact.normal().x, plotContact.normal().y, plotContact.normal().z),
+                    plotContact.fraction(), plotContact);
         }
         return closestImpact;
     }
@@ -757,7 +771,8 @@ public final class KickManager {
         };
     }
 
-    private static Vec3 findCurrentBlockImpact(
+    /** Resolves the fallback contact without treating a Sable plot location as world coordinates. */
+    private static ImpactLocation findCurrentBlockImpact(
             ServerLevel level, LivingEntity entity, Vec3 movement, Vec3 actualMovement) {
         AABB bounds = entity.getBoundingBox();
         Vec3 center = bounds.getCenter();
@@ -786,7 +801,7 @@ public final class KickManager {
             }
         }
         if (closestContact != null) {
-            return closestContact;
+            return new ImpactLocation(closestContact, null);
         }
 
         double leadingDistance = Math.abs(collisionDirection.x) * bounds.getXsize() * 0.5D
@@ -796,8 +811,15 @@ public final class KickManager {
         BlockHitResult hit = level.clip(new ClipContext(center, end,
                 ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, entity));
         return hit.getType() == HitResult.Type.MISS
-                ? center.add(collisionDirection.scale(leadingDistance))
-                : hit.getLocation();
+                ? new ImpactLocation(center.add(collisionDirection.scale(leadingDistance)), null)
+                : impactLocation(level, hit);
+    }
+
+    /** Uses the actual block position for ownership, including hits exactly on a plot block face. */
+    private static ImpactLocation impactLocation(ServerLevel level, BlockHitResult hit) {
+        SableCompatibility.Frame frame = SableCompatibility.at(level, hit.getBlockPos());
+        return frame == null ? new ImpactLocation(hit.getLocation(), null)
+                : new ImpactLocation(frame.toWorld(hit.getLocation()), hit.getBlockPos());
     }
 
     private static boolean canGrowCharge(ServerPlayer player) {
@@ -930,9 +952,17 @@ public final class KickManager {
     }
 
     static record FirstBlockImpact(
-            Vec3 location, Direction face, double movementFraction) {
+            Vec3 location, Direction face, double movementFraction,
+            @Nullable SableBlockCollision.Contact plotContact) {
+        /** Keeps the ordinary axis-aligned sweep on its existing path. */
+        FirstBlockImpact(Vec3 location, Direction face, double movementFraction) {
+            this(location, face, movementFraction, null);
+        }
+
+        /** Leaves a small gap before moving, so the measured contact is resolved once. */
         double safeMovementFraction(Vec3 movement) {
-            double normalSpeed = Math.max(BLOCK_SWEEP_EPSILON, switch (face.getAxis()) {
+            double normalSpeed = Math.max(BLOCK_SWEEP_EPSILON, plotContact != null
+                    ? Math.abs(movement.dot(plotContact.normal())) : switch (face.getAxis()) {
                 case X -> Math.abs(movement.x);
                 case Y -> Math.abs(movement.y);
                 case Z -> Math.abs(movement.z);
@@ -941,7 +971,12 @@ public final class KickManager {
                     movementFraction - BLOCK_SWEEP_EPSILON * 2.0D / normalSpeed);
         }
 
+        /** Keeps the movement parallel to the obstacle's face. */
         double remainingSpeed(Vec3 movement) {
+            if (plotContact != null) {
+                Vec3 normal = plotContact.normal();
+                return movement.subtract(normal.scale(movement.dot(normal))).length();
+            }
             return switch (face.getAxis()) {
                 case X -> Math.sqrt(movement.y * movement.y + movement.z * movement.z);
                 case Y -> Math.sqrt(movement.x * movement.x + movement.z * movement.z);
@@ -951,5 +986,9 @@ public final class KickManager {
     }
 
     private record SweptBoxHit(Direction face, double movementFraction) {
+    }
+
+    /** Carries world contact and the optional plot block used for block-state checks. */
+    private record ImpactLocation(Vec3 world, @Nullable BlockPos plotBlock) {
     }
 }

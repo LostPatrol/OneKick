@@ -4,6 +4,7 @@ package net.lostpatrol.onekick.world;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
 import javax.annotation.Nullable;
@@ -16,6 +17,7 @@ import net.lostpatrol.onekick.kick.KickMath;
 import net.lostpatrol.onekick.kick.KickSnapshot;
 import net.lostpatrol.onekick.network.KickNetwork;
 import net.lostpatrol.onekick.registry.ModTags;
+import net.lostpatrol.onekick.world.SableCompatibility.Frame;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.resources.ResourceKey;
@@ -26,10 +28,12 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Explosion;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -212,7 +216,7 @@ public final class BlockImpactService {
         ModCriteriaTriggers.trigger(
                 level, snapshot, KickAdvancementTrigger.Event.UNSTABLE_EXPLOSION);
         BlockImpactResult blockImpact = destroyBlocks
-                ? destroySphere(level, position, movement, power, snapshot, false)
+                ? destroySphere(level, excludedEntity, position, movement, power, snapshot, false)
                 : BlockImpactResult.EMPTY;
         AfterburnerService.igniteExplosion(level, position, power, snapshot);
         return new ExplosionResult(true, blockImpact);
@@ -236,18 +240,30 @@ public final class BlockImpactService {
         int maxZ = Mth.floor(position.z + diameter + 1.0D);
         List<Entity> entities = level.getEntities(excludedEntity,
                 new AABB(minX, minY, minZ, maxX, maxY, maxZ));
+        // Sable queries return raw plot entities and can visit an entity more than once.
+        if (SableCompatibility.active()) {
+            entities = new ArrayList<>(new LinkedHashSet<>(entities));
+        }
         entities.removeIf(entity -> entity instanceof ItemEntity);
         EventHooks.onExplosionDetonate(level, explosion, entities, diameter);
 
         for (Entity entity : entities) {
             if (entity instanceof ItemEntity || entity.ignoreExplosion(explosion)
-                    || entity.distanceToSqr(position) > diameter * diameter) {
+                    || explosionDistanceSquared(level, entity, position) > diameter * diameter) {
                 continue;
             }
             if (impactDamage > 0.0F) {
                 entity.hurt(damageSource, impactDamage);
             }
         }
+    }
+
+    /** Resolves raw plot entity positions without adding explosion knockback. */
+    private static double explosionDistanceSquared(ServerLevel level, Entity entity, Vec3 position) {
+        Frame frame = SableCompatibility.active()
+                ? SableCompatibility.at(level, entity.blockPosition()) : null;
+        return frame == null ? entity.distanceToSqr(position)
+                : frame.toWorld(entity.position()).distanceToSqr(position);
     }
 
     /**
@@ -286,9 +302,12 @@ public final class BlockImpactService {
                 : collectCapsuleCandidates(
                         level, impact, axis, depth, clipDistance, radius,
                         minX, minY, minZ, maxX, maxY, maxZ);
+        collectPlotCandidates(level, impact, axis, depth, clipDistance, radius,
+                new AABB(minX, minY, minZ, maxX + 1.0D, maxY + 1.0D, maxZ + 1.0D),
+                false, candidates);
         candidates.sort(Comparator.comparingDouble(BlockCandidate::distance));
         return affectBlocks(level, impact, axis, movement.length(), snapshot,
-                candidates.stream().map(BlockCandidate::pos).toList(),
+                candidates,
                 animateDebris, collectAffectedPositions);
     }
 
@@ -413,6 +432,7 @@ public final class BlockImpactService {
 
     private static BlockImpactResult destroySphere(
             ServerLevel level,
+            @Nullable Entity impactedEntity,
             Vec3 center,
             Vec3 movement,
             double radius,
@@ -430,9 +450,68 @@ public final class BlockImpactService {
                 candidates.add(cursor.immutable());
             }
         }
-        candidates.sort(Comparator.comparingDouble(pos -> Vec3.atCenterOf(pos).distanceToSqr(center)));
+        List<BlockCandidate> ownedCandidates = new ArrayList<>(candidates.size());
+        Vec3 axis = safeDirection(movement);
+        AABB worldBounds = new AABB(origin).inflate(blockRadius);
+        double clipDistance = SableCompatibility.active()
+                && !SableCompatibility.intersecting(level, worldBounds).isEmpty()
+                && !snapshot.singularityActive()
+                && impactedEntity instanceof LivingEntity living
+                ? findFirstKickImpassableDistance(level, living, center, axis, blockRadius)
+                : Double.POSITIVE_INFINITY;
+        double axisAbsSum = Math.abs(axis.x) + Math.abs(axis.y) + Math.abs(axis.z);
+        for (BlockPos pos : candidates) {
+            if (!isPastImpassableClip(Vec3.atCenterOf(pos).subtract(center).dot(axis),
+                    axisAbsSum, clipDistance)) {
+                ownedCandidates.add(new BlockCandidate(pos, Vec3.atCenterOf(pos).distanceToSqr(center)));
+            }
+        }
+        collectPlotCandidates(level, center, axis, 0.0D, clipDistance, radius,
+                worldBounds,
+                true, ownedCandidates);
+        ownedCandidates.sort(Comparator.comparingDouble(BlockCandidate::distance));
         return affectBlocks(level, center, safeDirection(movement), movement.length(), snapshot,
-                candidates, animateDebris, false);
+                ownedCandidates, animateDebris, false);
+    }
+
+    /** Adds only owned plot blocks whose transformed centers satisfy the original volume. */
+    private static void collectPlotCandidates(
+            ServerLevel level, Vec3 origin, Vec3 axis, double depth, double clipDistance,
+            double radius, AABB worldBounds, boolean sphere, List<BlockCandidate> candidates) {
+        if (!SableCompatibility.active()) {
+            return;
+        }
+        for (Frame frame : SableCompatibility.intersecting(level, worldBounds)) {
+            AABB plotScan = SableCompatibility.boundsInPlot(frame, worldBounds);
+            if (!plotScan.intersects(frame.plotBounds())) {
+                continue;
+            }
+            AABB bounds = plotScan.intersect(frame.plotBounds());
+            double axisAbsSum = Math.abs(axis.dot(frame.directionToWorld(new Vec3(1, 0, 0))))
+                    + Math.abs(axis.dot(frame.directionToWorld(new Vec3(0, 1, 0))))
+                    + Math.abs(axis.dot(frame.directionToWorld(new Vec3(0, 0, 1))));
+            for (BlockPos cursor : BlockPos.betweenClosed(
+                    BlockPos.containing(bounds.minX, bounds.minY, bounds.minZ),
+                    BlockPos.containing(Math.nextDown(bounds.maxX), Math.nextDown(bounds.maxY),
+                            Math.nextDown(bounds.maxZ)))) {
+                if (!frame.owns(level, cursor) || !level.hasChunkAt(cursor)
+                        || level.isOutsideBuildHeight(cursor)) {
+                    continue;
+                }
+                Vec3 relative = frame.toWorld(Vec3.atCenterOf(cursor)).subtract(origin);
+                double along = relative.dot(axis);
+                if (isPastImpassableClip(along, axisAbsSum, clipDistance)) {
+                    continue;
+                }
+                double effectiveRadius = radius * KickMath.irregularDestructionScale(level.random.nextDouble());
+                double distance = sphere ? relative.lengthSqr()
+                        : KickMath.destructionCapsuleDistanceSquared(
+                                along, relative.subtract(axis.scale(along)).length(), depth);
+                if (distance <= effectiveRadius * effectiveRadius) {
+                    candidates.add(new BlockCandidate(cursor.immutable(), sphere ? distance : along, frame));
+                }
+            }
+        }
     }
 
     private static void triggerBlockDestructionAdvancements(
@@ -455,7 +534,7 @@ public final class BlockImpactService {
             Vec3 direction,
             double impactSpeed,
             KickSnapshot snapshot,
-            List<BlockPos> candidates,
+            List<BlockCandidate> candidates,
             boolean animateDebris,
             boolean collectAffectedPositions) {
         ServerPlayer attacker = snapshot.attacker(level);
@@ -473,7 +552,13 @@ public final class BlockImpactService {
         List<BlockPos> affectedPositions = collectAffectedPositions
                 ? new ArrayList<>()
                 : List.of();
-        for (BlockPos pos : candidates) {
+        for (BlockCandidate candidate : candidates) {
+            BlockPos pos = candidate.pos();
+            Frame frame = candidate.frame();
+            if (frame != null ? !frame.owns(level, pos)
+                    : SableCompatibility.active() && SableCompatibility.at(level, pos) != null) {
+                continue;
+            }
             if (level.isOutsideBuildHeight(pos) || !level.hasChunkAt(pos)) {
                 continue;
             }
@@ -486,6 +571,10 @@ public final class BlockImpactService {
                 continue;
             }
 
+            // Capture the pose before a final block removal can delete its physics body.
+            Vec3 worldCenter = frame == null ? Vec3.atCenterOf(pos) : frame.toWorld(Vec3.atCenterOf(pos));
+            BlockPos worldPos = frame == null ? pos : BlockPos.containing(worldCenter);
+
             boolean eligibleDrop = silkTouch || level.random.nextDouble() < dropChance;
             boolean shouldDrop = !suppressDrops && eligibleDrop;
             boolean animate = animateDebris
@@ -497,8 +586,10 @@ public final class BlockImpactService {
                     && state.getDestroySpeed(level, pos) <= 4.0F
                     && level.random.nextFloat() < 0.65F;
             if (animate) {
-                Vec3 normalizedDirection = safeDirection(direction);
-                Vec3 relative = Vec3.atCenterOf(pos).subtract(impact);
+                Vec3 normalizedDirection = safeDirection(
+                        frame == null ? direction : frame.directionToPlot(direction));
+                Vec3 relative = frame == null ? worldCenter.subtract(impact)
+                        : Vec3.atCenterOf(pos).subtract(frame.toPlot(impact));
                 double along = relative.dot(normalizedDirection);
                 Vec3 radial = relative.subtract(normalizedDirection.scale(along));
                 if (radial.lengthSqr() > 1.0E-4D) {
@@ -517,8 +608,14 @@ public final class BlockImpactService {
                 double strength = KickMath.impactDebrisInitialSpeed(
                         impactSpeed, level.random.nextDouble());
                 Vec3 velocity = flightDirection.normalize().scale(strength);
-                ImpactDebrisEntity debris = ImpactDebrisEntity.launch(level, pos, state, velocity, attacker,
-                        silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop);
+                if (frame != null) {
+                    velocity = frame.directionToWorld(velocity);
+                }
+                ImpactDebrisEntity debris = frame == null
+                        ? ImpactDebrisEntity.launch(level, pos, state, velocity, attacker,
+                                silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop)
+                        : ImpactDebrisEntity.launch(level, pos, state, velocity, attacker,
+                                silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop, frame);
                 if (level.getBlockState(pos).equals(state)) {
                     debris.discard();
                     continue;
@@ -527,7 +624,7 @@ public final class BlockImpactService {
             } else {
                 if (!removeBlock(level, pos, state, attacker,
                         silkTouch ? snapshot.boots() : ItemStack.EMPTY, shouldDrop,
-                        singularityActive)) {
+                        singularityActive, frame)) {
                     continue;
                 }
             }
@@ -536,11 +633,11 @@ public final class BlockImpactService {
                         level, snapshot, KickAdvancementTrigger.Event.OVERRIDE);
             }
             if ((affected & 7) == 0) {
-                level.levelEvent(2001, pos, Block.getId(state));
+                level.levelEvent(2001, worldPos, Block.getId(state));
             }
             affected++;
             if (collectAffectedPositions) {
-                affectedPositions.add(pos.immutable());
+                affectedPositions.add(worldPos.immutable());
             }
         }
         return new BlockImpactResult(affected,
@@ -592,7 +689,8 @@ public final class BlockImpactService {
                 }
             }
         }
-        return false;
+        return SableCompatibility.active() && SableBlockCollision.first(
+                level, entity, entity.getBoundingBox(), movement, true) != null;
     }
 
     /**
@@ -640,6 +738,16 @@ public final class BlockImpactService {
                     if (along >= -IMPASSABLE_CLIP_EPSILON && along < closest) {
                         closest = Math.max(0.0D, along);
                     }
+                }
+            }
+        }
+        if (SableCompatibility.active()) {
+            SableBlockCollision.Contact contact = SableBlockCollision.first(
+                    level, entity, entity.getBoundingBox(), axis.scale(maxDistance), true);
+            if (contact != null) {
+                double along = contact.worldPoint().subtract(impact).dot(axis);
+                if (along >= -IMPASSABLE_CLIP_EPSILON) {
+                    closest = Math.min(closest, Math.max(0.0D, along));
                 }
             }
         }
@@ -701,26 +809,58 @@ public final class BlockImpactService {
             ServerPlayer attacker,
             ItemStack tool,
             boolean shouldDrop,
-            boolean singularityActive) {
+            boolean singularityActive,
+            @Nullable Frame frame) {
         BlockEntity blockEntity = level.getBlockEntity(pos);
         List<ItemStack> drops = shouldDrop
                 ? Block.getDrops(state, level, pos, blockEntity, attacker, tool)
                 : List.of();
+        List<ItemEntity> worldDrops = frame == null ? List.of()
+                : preparePlotDrops(level, pos, drops, frame);
         BlockState replacement = singularityActive
                 ? Blocks.AIR.defaultBlockState()
                 : state.getFluidState().createLegacyBlock();
         if (!level.setBlock(pos, replacement, 3) || level.getBlockState(pos).equals(state)) {
             return false;
         }
-        drops.forEach(stack -> Block.popResource(level, pos, stack));
+        if (frame == null) {
+            drops.forEach(stack -> Block.popResource(level, pos, stack));
+        } else {
+            worldDrops.forEach(level::addFreshEntity);
+        }
         return true;
+    }
+
+    /** Samples vanilla-style drop offsets while the plot's pre-removal pose is available. */
+    private static List<ItemEntity> preparePlotDrops(
+            ServerLevel level, BlockPos pos, List<ItemStack> drops, Frame frame) {
+        List<ItemEntity> entities = new ArrayList<>();
+        for (ItemStack stack : drops) {
+            Vec3 position = frame.toWorld(Vec3.atCenterOf(pos).add(
+                    Mth.nextDouble(level.random, -0.25D, 0.25D),
+                    Mth.nextDouble(level.random, -0.25D, 0.25D),
+                    Mth.nextDouble(level.random, -0.25D, 0.25D)))
+                    .add(0.0D, -EntityType.ITEM.getHeight() / 2.0D, 0.0D);
+            if (stack.isEmpty() || !level.getGameRules().getBoolean(GameRules.RULE_DOBLOCKDROPS)
+                    || level.restoringBlockSnapshots) {
+                continue;
+            }
+            ItemEntity item = new ItemEntity(level, position.x, position.y, position.z, stack);
+            item.setDefaultPickUpDelay();
+            entities.add(item);
+        }
+        return entities;
     }
 
     private static Vec3 safeDirection(Vec3 movement) {
         return movement.lengthSqr() < 1.0E-6D ? new Vec3(0.0D, 0.0D, 1.0D) : movement.normalize();
     }
 
-    private record BlockCandidate(BlockPos pos, double distance) {
+    private record BlockCandidate(BlockPos pos, double distance, @Nullable Frame frame) {
+        /** Ordinary blocks retain the original scan and ordering. */
+        private BlockCandidate(BlockPos pos, double distance) {
+            this(pos, distance, null);
+        }
     }
 
     private record BlockImpactResult(

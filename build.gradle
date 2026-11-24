@@ -35,6 +35,14 @@ repositories {
     maven {
         url = 'https://raw.githubusercontent.com/tom5454/maven/main'
     }
+    // Sable publishes the common APIs used by the optional server compatibility bridge.
+    maven {
+        url = 'https://maven.ryanhcode.dev/releases'
+        content {
+            includeGroup 'dev.ryanhcode.sable'
+            includeGroup 'dev.ryanhcode.sable-companion'
+        }
+    }
 }
 
 base {
@@ -119,6 +127,13 @@ dependencies {
     compileOnly "com.zigythebird.playeranim:PlayerAnimationLibNeo:${pal_version}"
     // Optional at runtime: CPM classes are isolated behind a loaded-mod guard.
     compileOnly "com.tom5454.cpm:CustomPlayerModels-API:${cpm_api_version}"
+    // Keep Sable optional and avoid pulling its implementation dependencies into compilation.
+    compileOnly("dev.ryanhcode.sable:sable-common-${minecraft_version}:${sable_version}") {
+        transitive = false
+    }
+    compileOnly("dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_companion_version}") {
+        transitive = false
+    }
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
 
